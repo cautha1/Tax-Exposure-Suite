@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
-import { supabase } from "../lib/supabase.js";
+import { db, companiesTable, transactionsTable, taxRiskFlagsTable, uploadsTable } from "../lib/db.js";
+import { eq, gte, count, sum, sql } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -7,34 +8,35 @@ router.get("/dashboard/stats", async (req, res) => {
   try {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const [
-      { count: totalClients },
-      { count: totalTransactions },
-      { data: openFlags },
-      { count: recentUploads },
-      { data: companies },
-    ] = await Promise.all([
-      supabase.from("companies").select("*", { count: "exact", head: true }),
-      supabase.from("transactions").select("*", { count: "exact", head: true }),
-      supabase.from("tax_risk_flags").select("estimated_exposure").eq("status", "open"),
-      supabase.from("uploads").select("*", { count: "exact", head: true }).gte("created_at", sevenDaysAgo.toISOString()),
-      supabase.from("companies").select("risk_level"),
+
+    const [[{ totalClients }], [{ totalTransactions }], openFlags, [{ recentUploads }], companies] = await Promise.all([
+      db.select({ totalClients: count() }).from(companiesTable),
+      db.select({ totalTransactions: count() }).from(transactionsTable),
+      db.select({ exposure: taxRiskFlagsTable.estimatedExposure }).from(taxRiskFlagsTable).where(eq(taxRiskFlagsTable.status, "open")),
+      db.select({ recentUploads: count() }).from(uploadsTable).where(gte(uploadsTable.createdAt, sevenDaysAgo)),
+      db.select({ riskLevel: companiesTable.riskLevel }).from(companiesTable),
     ]);
-    const estimatedExposure = (openFlags ?? []).reduce((s: number, r: Record<string, unknown>) => s + Number(r.estimated_exposure ?? 0), 0);
-    const highRiskCompanies = (companies ?? []).filter((c: Record<string, unknown>) => c.risk_level === "high").length;
-    res.json({ totalClients: totalClients ?? 0, totalTransactions: totalTransactions ?? 0, openFlags: (openFlags ?? []).length, estimatedExposure, highRiskCompanies, recentUploads: recentUploads ?? 0 });
+
+    const estimatedExposure = openFlags.reduce((s, r) => s + Number(r.exposure ?? 0), 0);
+    const highRiskCompanies = companies.filter(c => c.riskLevel === "high").length;
+
+    res.json({
+      totalClients: Number(totalClients), totalTransactions: Number(totalTransactions),
+      openFlags: openFlags.length, estimatedExposure, highRiskCompanies,
+      recentUploads: Number(recentUploads),
+    });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 router.get("/dashboard/charts", async (req, res) => {
   try {
-    const { data: risks } = await supabase.from("tax_risk_flags").select("*");
+    const risks = await db.select().from(taxRiskFlagsTable);
     const catMap: Record<string, { count: number; exposure: number }> = {};
     const sevMap: Record<string, number> = {};
-    for (const r of risks ?? []) {
+    for (const r of risks) {
       const cat = r.category ?? "Other";
       if (!catMap[cat]) catMap[cat] = { count: 0, exposure: 0 };
-      catMap[cat].count++; catMap[cat].exposure += Number(r.estimated_exposure ?? 0);
+      catMap[cat].count++; catMap[cat].exposure += Number(r.estimatedExposure ?? 0);
       const sev = r.severity ?? "low";
       sevMap[sev] = (sevMap[sev] ?? 0) + 1;
     }
