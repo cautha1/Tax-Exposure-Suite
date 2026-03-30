@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Tax Exposure Intelligence Platform"
+version = "1.0.0"
+id = "artifacts/tax-platform"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19683
+
+[services.development]
+run = "pnpm --filter @workspace/tax-platform run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/tax-platform", "run", "build" ]
+publicDir = "artifacts/tax-platform/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19683"
+BASE_PATH = "/"

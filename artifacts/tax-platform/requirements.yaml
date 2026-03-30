@@ -1,0 +1,19 @@
+packages:
+  "recharts": "Data visualization and charts for the dashboard"
+  "react-dropzone": "Drag and drop CSV file upload"
+  "papaparse": "Client-side CSV parsing and validation"
+  "framer-motion": "Smooth page transitions and component animations"
+  "date-fns": "Date formatting for tables and charts"
+  "@hookform/resolvers": "Zod validation for react-hook-form"
+  "react-hook-form": "Form state management"
+  "lucide-react": "Icons"
+
+images:
+  - path: "artifacts/tax-platform/public/images/hero-bg.png"
+    description: "Premium deep navy and indigo abstract geometric gradient background, modern enterprise fintech style, subtle glowing light leaks, very professional and clean"
+    aspect_ratio: "16:9"
+
+notes:
+  - Using generated API hooks from @workspace/api-client-react
+  - Implementing local mock auth wrapper in use-auth.ts since login/signup endpoints aren't in the spec, but utilizing the real profile if available
+  - CSV upload validates required tax transaction columns before submission

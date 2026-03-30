@@ -1,22 +1,34 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Tax Exposure Intelligence Platform API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication
+  - name: companies
+    description: Company management
+  - name: transactions
+    description: Transaction management
+  - name: risks
+    description: Tax risk flags
+  - name: reports
+    description: Reports
+  - name: uploads
+    description: File uploads
+  - name: dashboard
+    description: Dashboard analytics
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +36,347 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user profile
+      responses:
+        "200":
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "401":
+          description: Unauthorized
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+
+  /companies:
+    get:
+      operationId: listCompanies
+      tags: [companies]
+      summary: List companies
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: industry
+          in: query
+          schema:
+            type: string
+        - name: riskLevel
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of companies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Company"
+    post:
+      operationId: createCompany
+      tags: [companies]
+      summary: Create company
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCompanyRequest"
+      responses:
+        "201":
+          description: Created company
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+
+  /companies/{id}:
+    get:
+      operationId: getCompany
+      tags: [companies]
+      summary: Get company by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Company
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+        "404":
+          description: Not found
+    put:
+      operationId: updateCompany
+      tags: [companies]
+      summary: Update company
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCompanyRequest"
+      responses:
+        "200":
+          description: Updated company
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+
+  /companies/{id}/summary:
+    get:
+      operationId: getCompanySummary
+      tags: [companies]
+      summary: Get company analytics summary
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Company summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanySummary"
+
+  /transactions:
+    get:
+      operationId: listTransactions
+      tags: [transactions]
+      summary: List transactions
+      parameters:
+        - name: companyId
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: taxType
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: List of transactions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionListResponse"
+
+  /transactions/upload:
+    post:
+      operationId: uploadTransactions
+      tags: [transactions]
+      summary: Upload transactions CSV
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadTransactionsRequest"
+      responses:
+        "200":
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResult"
+
+  /risks:
+    get:
+      operationId: listRisks
+      tags: [risks]
+      summary: List tax risk flags
+      parameters:
+        - name: companyId
+          in: query
+          schema:
+            type: string
+        - name: severity
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: List of risks
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RiskListResponse"
+
+  /risks/{id}/resolve:
+    post:
+      operationId: resolveRisk
+      tags: [risks]
+      summary: Resolve a risk flag
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Risk resolved
+
+  /reports:
+    get:
+      operationId: listReports
+      tags: [reports]
+      summary: List reports
+      parameters:
+        - name: companyId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of reports
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Report"
+    post:
+      operationId: generateReport
+      tags: [reports]
+      summary: Generate report for a company
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateReportRequest"
+      responses:
+        "201":
+          description: Generated report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+
+  /reports/{id}:
+    get:
+      operationId: getReport
+      tags: [reports]
+      summary: Get report by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+
+  /dashboard/stats:
+    get:
+      operationId: getDashboardStats
+      tags: [dashboard]
+      summary: Get dashboard statistics
+      responses:
+        "200":
+          description: Dashboard stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
+  /dashboard/charts:
+    get:
+      operationId: getDashboardCharts
+      tags: [dashboard]
+      summary: Get dashboard chart data
+      responses:
+        "200":
+          description: Chart data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardCharts"
+
+  /uploads:
+    get:
+      operationId: listUploads
+      tags: [uploads]
+      summary: List uploads
+      parameters:
+        - name: companyId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of uploads
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Upload"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +387,444 @@ components:
       required:
         - status
 
+    Profile:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        fullName:
+          type: string
+        role:
+          type: string
+          enum: [admin, advisor, client_user]
+        companyId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - email
+        - fullName
+        - role
+        - createdAt
+
+    Company:
+      type: object
+      properties:
+        id:
+          type: string
+        companyName:
+          type: string
+        tinOrTaxId:
+          type: string
+          nullable: true
+        industry:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
+        financialYear:
+          type: string
+          nullable: true
+        riskLevel:
+          type: string
+          nullable: true
+        riskScore:
+          type: number
+          nullable: true
+        transactionCount:
+          type: integer
+          nullable: true
+        openFlagsCount:
+          type: integer
+          nullable: true
+        estimatedExposure:
+          type: number
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - companyName
+        - createdAt
+
+    CreateCompanyRequest:
+      type: object
+      properties:
+        companyName:
+          type: string
+        tinOrTaxId:
+          type: string
+        industry:
+          type: string
+        country:
+          type: string
+        financialYear:
+          type: string
+      required:
+        - companyName
+
+    CompanySummary:
+      type: object
+      properties:
+        totalTransactions:
+          type: integer
+        openRisks:
+          type: integer
+        estimatedExposure:
+          type: number
+        riskScore:
+          type: number
+        riskLevel:
+          type: string
+        risksByCategory:
+          type: array
+          items:
+            $ref: "#/components/schemas/RiskCategory"
+        severityBreakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/SeverityItem"
+        monthlyExposure:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonthlyExposure"
+      required:
+        - totalTransactions
+        - openRisks
+        - estimatedExposure
+        - riskScore
+        - riskLevel
+        - risksByCategory
+        - severityBreakdown
+        - monthlyExposure
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+        companyId:
+          type: string
+        transactionDate:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        reference:
+          type: string
+          nullable: true
+        amount:
+          type: number
+          nullable: true
+        currency:
+          type: string
+          nullable: true
+        accountCode:
+          type: string
+          nullable: true
+        accountCategory:
+          type: string
+          nullable: true
+        vendorName:
+          type: string
+          nullable: true
+        customerName:
+          type: string
+          nullable: true
+        taxType:
+          type: string
+          nullable: true
+        vatAmount:
+          type: number
+          nullable: true
+        withholdingTaxAmount:
+          type: number
+          nullable: true
+        transactionType:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - companyId
+        - createdAt
+
+    TransactionListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+      required:
+        - data
+        - total
+        - page
+        - limit
+
+    UploadTransactionsRequest:
+      type: object
+      properties:
+        companyId:
+          type: string
+        transactions:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        fileName:
+          type: string
+      required:
+        - companyId
+        - transactions
+        - fileName
+
+    UploadResult:
+      type: object
+      properties:
+        uploadId:
+          type: string
+        rowsImported:
+          type: integer
+        message:
+          type: string
+      required:
+        - uploadId
+        - rowsImported
+        - message
+
+    TaxRiskFlag:
+      type: object
+      properties:
+        id:
+          type: string
+        companyId:
+          type: string
+        transactionId:
+          type: string
+          nullable: true
+        ruleCode:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        severity:
+          type: string
+          nullable: true
+        estimatedExposure:
+          type: number
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        companyName:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - companyId
+        - createdAt
+
+    RiskListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaxRiskFlag"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+      required:
+        - data
+        - total
+        - page
+        - limit
+
+    Report:
+      type: object
+      properties:
+        id:
+          type: string
+        companyId:
+          type: string
+        title:
+          type: string
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        summary:
+          type: string
+          nullable: true
+        totalExposure:
+          type: number
+          nullable: true
+        highRisks:
+          type: integer
+          nullable: true
+        mediumRisks:
+          type: integer
+          nullable: true
+        lowRisks:
+          type: integer
+          nullable: true
+        companyName:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - companyId
+        - createdAt
+
+    GenerateReportRequest:
+      type: object
+      properties:
+        companyId:
+          type: string
+        title:
+          type: string
+      required:
+        - companyId
+
+    DashboardStats:
+      type: object
+      properties:
+        totalClients:
+          type: integer
+        totalTransactions:
+          type: integer
+        openFlags:
+          type: integer
+        estimatedExposure:
+          type: number
+        highRiskCompanies:
+          type: integer
+        recentUploads:
+          type: integer
+      required:
+        - totalClients
+        - totalTransactions
+        - openFlags
+        - estimatedExposure
+        - highRiskCompanies
+        - recentUploads
+
+    DashboardCharts:
+      type: object
+      properties:
+        riskByCategory:
+          type: array
+          items:
+            $ref: "#/components/schemas/RiskCategory"
+        severityBreakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/SeverityItem"
+        monthlyExposure:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonthlyExposure"
+        flagsOverTime:
+          type: array
+          items:
+            $ref: "#/components/schemas/FlagsOverTime"
+      required:
+        - riskByCategory
+        - severityBreakdown
+        - monthlyExposure
+        - flagsOverTime
+
+    RiskCategory:
+      type: object
+      properties:
+        category:
+          type: string
+        count:
+          type: integer
+        exposure:
+          type: number
+      required:
+        - category
+        - count
+        - exposure
+
+    SeverityItem:
+      type: object
+      properties:
+        severity:
+          type: string
+        count:
+          type: integer
+      required:
+        - severity
+        - count
+
+    MonthlyExposure:
+      type: object
+      properties:
+        month:
+          type: string
+        exposure:
+          type: number
+      required:
+        - month
+        - exposure
+
+    FlagsOverTime:
+      type: object
+      properties:
+        month:
+          type: string
+        flags:
+          type: integer
+      required:
+        - month
+        - flags
+
+    Upload:
+      type: object
+      properties:
+        id:
+          type: string
+        companyId:
+          type: string
+        fileName:
+          type: string
+          nullable: true
+        rowCount:
+          type: integer
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - companyId
+        - createdAt
