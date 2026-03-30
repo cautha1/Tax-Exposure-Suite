@@ -1,19 +1,24 @@
-import { create } from 'zustard'; // Will use a simple local state approach instead
-import { useState, useEffect } from 'react';
-import { useLocation } from 'wouter';
-import { Profile, ProfileRole } from '@workspace/api-client-react';
+import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
+import { api } from "../lib/api";
 
-// Define session type based on schema
+export interface AuthUser {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  companyId: string | null;
+  createdAt: string;
+}
+
 export interface AuthSession {
-  user: Profile | null;
+  user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
 }
 
-const SESSION_KEY = 'tax_platform_session';
+const SESSION_KEY = "tax_platform_session";
 
-// A lightweight mock authentication hook since login/signup endpoints aren't strictly defined
-// In a real app, this would use React Query mutations for login/signup
 export function useAuth() {
   const [, setLocation] = useLocation();
   const [session, setSession] = useState<AuthSession>({
@@ -23,13 +28,12 @@ export function useAuth() {
   });
 
   useEffect(() => {
-    // Check local storage on mount
     const stored = localStorage.getItem(SESSION_KEY);
     if (stored) {
       try {
-        const user = JSON.parse(stored) as Profile;
+        const user = JSON.parse(stored) as AuthUser;
         setSession({ user, isAuthenticated: true, isLoading: false });
-      } catch (e) {
+      } catch {
         localStorage.removeItem(SESSION_KEY);
         setSession({ user: null, isAuthenticated: false, isLoading: false });
       }
@@ -39,52 +43,41 @@ export function useAuth() {
   }, []);
 
   const login = async (email: string, password: string): Promise<void> => {
-    // Mock login delay
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    
-    // Create a mock user
-    const mockUser: Profile = {
-      id: `usr_${Math.random().toString(36).substring(2, 9)}`,
-      email,
-      fullName: email.split('@')[0].replace('.', ' '),
-      role: 'advisor' as ProfileRole,
-      createdAt: new Date().toISOString(),
-      companyId: null, // Admins/Advisors don't need a specific company ID
-    };
-
-    localStorage.setItem(SESSION_KEY, JSON.stringify(mockUser));
-    setSession({ user: mockUser, isAuthenticated: true, isLoading: false });
-    setLocation('/dashboard');
+    const user = await api.post<AuthUser>("/auth/login", { email, password });
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    setSession({ user, isAuthenticated: true, isLoading: false });
+    setLocation("/dashboard");
   };
 
-  const signup = async (email: string, password: string, fullName: string, role: ProfileRole, companyId?: string): Promise<void> => {
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    
-    const mockUser: Profile = {
-      id: `usr_${Math.random().toString(36).substring(2, 9)}`,
+  const signup = async (
+    email: string,
+    password: string,
+    fullName: string,
+    role: string,
+    companyId?: string
+  ): Promise<void> => {
+    const user = await api.post<AuthUser>("/auth/signup", {
       email,
+      password,
       fullName,
       role,
-      companyId: companyId || null,
-      createdAt: new Date().toISOString(),
-    };
-
-    localStorage.setItem(SESSION_KEY, JSON.stringify(mockUser));
-    setSession({ user: mockUser, isAuthenticated: true, isLoading: false });
-    setLocation('/dashboard');
+      companyId,
+    });
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    setSession({ user, isAuthenticated: true, isLoading: false });
+    setLocation("/dashboard");
   };
 
   const logout = async (): Promise<void> => {
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    try {
+      await api.post("/auth/logout", {});
+    } catch {
+      // ignore errors on logout
+    }
     localStorage.removeItem(SESSION_KEY);
     setSession({ user: null, isAuthenticated: false, isLoading: false });
-    setLocation('/login');
+    setLocation("/login");
   };
 
-  return {
-    ...session,
-    login,
-    signup,
-    logout,
-  };
+  return { ...session, login, signup, logout };
 }

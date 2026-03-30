@@ -75,6 +75,7 @@
     "zod": "catalog:"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.100.1",
     "papaparse": "^5.5.3",
     "react-dropzone": "^15.0.0"
   }

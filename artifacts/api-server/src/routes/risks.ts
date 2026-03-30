@@ -1,74 +1,47 @@
 import { Router, type IRouter } from "express";
-import { db } from "@workspace/db";
-import { taxRiskFlagsTable, companiesTable } from "@workspace/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { supabase } from "../lib/supabase.js";
 
 const router: IRouter = Router();
+
+const fmtRisk = (r: Record<string, unknown>, companyMap: Record<string, string>) => ({
+  id: r.id, companyId: r.company_id, transactionId: r.transaction_id ?? null,
+  ruleCode: r.rule_code ?? null, description: r.description ?? null,
+  severity: r.severity ?? null, estimatedExposure: r.estimated_exposure ? Number(r.estimated_exposure) : null,
+  status: r.status ?? null, category: r.category ?? null,
+  companyName: companyMap[r.company_id as string] ?? null, createdAt: r.created_at,
+});
 
 router.get("/risks", async (req, res) => {
   try {
     const { companyId, severity, status, page = "1", limit = "50" } = req.query as Record<string, string>;
     const pageNum = Math.max(1, parseInt(page));
     const limitNum = Math.min(200, parseInt(limit));
-    const offset = (pageNum - 1) * limitNum;
+    const from = (pageNum - 1) * limitNum;
 
-    const conditions = [];
-    if (companyId) conditions.push(eq(taxRiskFlagsTable.companyId, companyId));
-    if (severity) conditions.push(eq(taxRiskFlagsTable.severity, severity));
-    if (status) conditions.push(eq(taxRiskFlagsTable.status, status));
-
-    const where = conditions.length ? and(...conditions) : undefined;
-
-    const [rows, totalResult, companies] = await Promise.all([
-      db.select().from(taxRiskFlagsTable).where(where).limit(limitNum).offset(offset),
-      db.select({ count: sql<number>`count(*)` }).from(taxRiskFlagsTable).where(where),
-      db.select({ id: companiesTable.id, name: companiesTable.companyName }).from(companiesTable),
+    let query = supabase.from("tax_risk_flags").select("*", { count: "exact" });
+    if (companyId) query = query.eq("company_id", companyId);
+    if (severity) query = query.eq("severity", severity);
+    if (status) query = query.eq("status", status);
+    const [{ data, error, count }, { data: companies }] = await Promise.all([
+      query.range(from, from + limitNum - 1).order("created_at", { ascending: false }),
+      supabase.from("companies").select("id, company_name"),
     ]);
-
-    const companyMap = Object.fromEntries(companies.map((c) => [c.id, c.name]));
-
-    res.json({
-      data: rows.map((r) => ({
-        id: r.id,
-        companyId: r.companyId,
-        transactionId: r.transactionId ?? null,
-        ruleCode: r.ruleCode ?? null,
-        description: r.description ?? null,
-        severity: r.severity ?? null,
-        estimatedExposure: r.estimatedExposure ? Number(r.estimatedExposure) : null,
-        status: r.status ?? null,
-        category: r.category ?? null,
-        companyName: companyMap[r.companyId] ?? null,
-        createdAt: r.createdAt,
-      })),
-      total: Number(totalResult[0]?.count ?? 0),
-      page: pageNum,
-      limit: limitNum,
-    });
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+    if (error) throw error;
+    const companyMap = Object.fromEntries((companies ?? []).map((c: Record<string, string>) => [c.id, c.company_name]));
+    res.json({ data: (data ?? []).map((r) => fmtRisk(r, companyMap)), total: count ?? 0, page: pageNum, limit: limitNum });
+  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 router.post("/risks/:id/resolve", async (req, res) => {
   try {
-    const updated = await db.update(taxRiskFlagsTable)
-      .set({ status: "resolved", updatedAt: new Date() })
-      .where(eq(taxRiskFlagsTable.id, req.params.id))
-      .returning();
-    if (!updated.length) { res.status(404).json({ error: "Not found" }); return; }
-
-    const risk = updated[0];
-    await db.update(companiesTable)
-      .set({ openFlagsCount: sql`GREATEST(open_flags_count - 1, 0)` })
-      .where(eq(companiesTable.id, risk.companyId));
-
+    const { data, error } = await supabase.from("tax_risk_flags").update({ status: "resolved", updated_at: new Date().toISOString() }).eq("id", req.params.id).select().single();
+    if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    const { data: co } = await supabase.from("companies").select("open_flags_count").eq("id", data.company_id).single();
+    if (co) {
+      await supabase.from("companies").update({ open_flags_count: Math.max((co.open_flags_count ?? 1) - 1, 0), updated_at: new Date().toISOString() }).eq("id", data.company_id);
+    }
     res.json({ success: true });
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 export default router;

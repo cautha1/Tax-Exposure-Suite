@@ -1,188 +1,92 @@
 import { Router, type IRouter } from "express";
-import { db } from "@workspace/db";
-import {
-  companiesTable,
-  transactionsTable,
-  taxRiskFlagsTable,
-  uploadsTable,
-  reportsTable,
-} from "@workspace/db/schema";
-import { eq, ilike, and, sql } from "drizzle-orm";
+import { supabase } from "../lib/supabase.js";
 
 const router: IRouter = Router();
 
+const fmt = (c: Record<string, unknown>) => ({
+  id: c.id, companyName: c.company_name, tinOrTaxId: c.tin_or_tax_id ?? null,
+  industry: c.industry ?? null, country: c.country ?? null, financialYear: c.financial_year ?? null,
+  riskLevel: c.risk_level ?? null, riskScore: c.risk_score ? Number(c.risk_score) : null,
+  transactionCount: c.transaction_count ?? null, openFlagsCount: c.open_flags_count ?? null,
+  estimatedExposure: c.estimated_exposure ? Number(c.estimated_exposure) : null, createdAt: c.created_at,
+});
+
 router.get("/companies", async (req, res) => {
   try {
+    let query = supabase.from("companies").select("*").order("created_at");
     const { search, industry, riskLevel } = req.query as Record<string, string>;
-    const conditions = [];
-    if (search) conditions.push(ilike(companiesTable.companyName, `%${search}%`));
-    if (industry) conditions.push(eq(companiesTable.industry, industry));
-    if (riskLevel) conditions.push(eq(companiesTable.riskLevel, riskLevel));
-    const rows = conditions.length
-      ? await db.select().from(companiesTable).where(and(...conditions)).orderBy(companiesTable.createdAt)
-      : await db.select().from(companiesTable).orderBy(companiesTable.createdAt);
-    res.json(rows.map((c) => ({
-      id: c.id,
-      companyName: c.companyName,
-      tinOrTaxId: c.tinOrTaxId ?? null,
-      industry: c.industry ?? null,
-      country: c.country ?? null,
-      financialYear: c.financialYear ?? null,
-      riskLevel: c.riskLevel ?? null,
-      riskScore: c.riskScore ? Number(c.riskScore) : null,
-      transactionCount: c.transactionCount ?? null,
-      openFlagsCount: c.openFlagsCount ?? null,
-      estimatedExposure: c.estimatedExposure ? Number(c.estimatedExposure) : null,
-      createdAt: c.createdAt,
-    })));
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+    if (search) query = query.ilike("company_name", `%${search}%`);
+    if (industry) query = query.eq("industry", industry);
+    if (riskLevel) query = query.eq("risk_level", riskLevel);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json((data ?? []).map(fmt));
+  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 router.post("/companies", async (req, res) => {
   try {
     const { companyName, tinOrTaxId, industry, country, financialYear } = req.body;
-    if (!companyName) {
-      res.status(400).json({ error: "companyName is required" });
-      return;
-    }
-    const inserted = await db.insert(companiesTable).values({
-      companyName,
-      tinOrTaxId: tinOrTaxId || null,
-      industry: industry || null,
-      country: country || null,
-      financialYear: financialYear || null,
-      riskLevel: "low",
-      riskScore: "0",
-    }).returning();
-    const c = inserted[0];
-    res.status(201).json({
-      id: c.id,
-      companyName: c.companyName,
-      tinOrTaxId: c.tinOrTaxId ?? null,
-      industry: c.industry ?? null,
-      country: c.country ?? null,
-      financialYear: c.financialYear ?? null,
-      riskLevel: c.riskLevel ?? null,
-      riskScore: c.riskScore ? Number(c.riskScore) : null,
-      transactionCount: c.transactionCount ?? null,
-      openFlagsCount: c.openFlagsCount ?? null,
-      estimatedExposure: c.estimatedExposure ? Number(c.estimatedExposure) : null,
-      createdAt: c.createdAt,
-    });
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+    if (!companyName) { res.status(400).json({ error: "companyName is required" }); return; }
+    const { data, error } = await supabase.from("companies").insert({
+      company_name: companyName, tin_or_tax_id: tinOrTaxId || null, industry: industry || null,
+      country: country || null, financial_year: financialYear || null, risk_level: "low", risk_score: 0,
+    }).select().single();
+    if (error || !data) { res.status(500).json({ error: error?.message ?? "Failed" }); return; }
+    res.status(201).json(fmt(data));
+  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 router.get("/companies/:id", async (req, res) => {
   try {
-    const rows = await db.select().from(companiesTable).where(eq(companiesTable.id, req.params.id)).limit(1);
-    if (!rows.length) { res.status(404).json({ error: "Not found" }); return; }
-    const c = rows[0];
-    res.json({
-      id: c.id,
-      companyName: c.companyName,
-      tinOrTaxId: c.tinOrTaxId ?? null,
-      industry: c.industry ?? null,
-      country: c.country ?? null,
-      financialYear: c.financialYear ?? null,
-      riskLevel: c.riskLevel ?? null,
-      riskScore: c.riskScore ? Number(c.riskScore) : null,
-      transactionCount: c.transactionCount ?? null,
-      openFlagsCount: c.openFlagsCount ?? null,
-      estimatedExposure: c.estimatedExposure ? Number(c.estimatedExposure) : null,
-      createdAt: c.createdAt,
-    });
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+    const { data, error } = await supabase.from("companies").select("*").eq("id", req.params.id).single();
+    if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    res.json(fmt(data));
+  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 router.put("/companies/:id", async (req, res) => {
   try {
     const { companyName, tinOrTaxId, industry, country, financialYear } = req.body;
-    const updated = await db.update(companiesTable)
-      .set({ companyName, tinOrTaxId, industry, country, financialYear, updatedAt: new Date() })
-      .where(eq(companiesTable.id, req.params.id))
-      .returning();
-    if (!updated.length) { res.status(404).json({ error: "Not found" }); return; }
-    const c = updated[0];
-    res.json({
-      id: c.id,
-      companyName: c.companyName,
-      tinOrTaxId: c.tinOrTaxId ?? null,
-      industry: c.industry ?? null,
-      country: c.country ?? null,
-      financialYear: c.financialYear ?? null,
-      riskLevel: c.riskLevel ?? null,
-      riskScore: c.riskScore ? Number(c.riskScore) : null,
-      transactionCount: c.transactionCount ?? null,
-      openFlagsCount: c.openFlagsCount ?? null,
-      estimatedExposure: c.estimatedExposure ? Number(c.estimatedExposure) : null,
-      createdAt: c.createdAt,
-    });
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+    const { data, error } = await supabase.from("companies").update({
+      company_name: companyName, tin_or_tax_id: tinOrTaxId, industry, country,
+      financial_year: financialYear, updated_at: new Date().toISOString(),
+    }).eq("id", req.params.id).select().single();
+    if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    res.json(fmt(data));
+  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 router.get("/companies/:id/summary", async (req, res) => {
   try {
     const { id } = req.params;
-    const [txResult, riskResult] = await Promise.all([
-      db.select({ count: sql<number>`count(*)` }).from(transactionsTable).where(eq(transactionsTable.companyId, id)),
-      db.select().from(taxRiskFlagsTable).where(eq(taxRiskFlagsTable.companyId, id)),
+    const [{ count: txCount }, { data: risks }] = await Promise.all([
+      supabase.from("transactions").select("*", { count: "exact", head: true }).eq("company_id", id),
+      supabase.from("tax_risk_flags").select("*").eq("company_id", id),
     ]);
-    const totalTransactions = Number(txResult[0]?.count ?? 0);
-    const openRisks = riskResult.filter((r) => r.status === "open").length;
-    const estimatedExposure = riskResult
-      .filter((r) => r.status === "open")
-      .reduce((s, r) => s + Number(r.estimatedExposure ?? 0), 0);
-    const riskScore = Math.min(100, Math.round((openRisks / Math.max(totalTransactions, 1)) * 1000));
-    let riskLevel = "low";
-    if (riskScore > 60) riskLevel = "high";
-    else if (riskScore > 30) riskLevel = "medium";
-
-    const categoryMap: Record<string, { count: number; exposure: number }> = {};
-    const severityMap: Record<string, number> = {};
-    for (const r of riskResult) {
-      const cat = r.category ?? "Other";
-      if (!categoryMap[cat]) categoryMap[cat] = { count: 0, exposure: 0 };
-      categoryMap[cat].count++;
-      categoryMap[cat].exposure += Number(r.estimatedExposure ?? 0);
-      const sev = r.severity ?? "low";
-      severityMap[sev] = (severityMap[sev] ?? 0) + 1;
+    const totalTransactions = txCount ?? 0;
+    const allRisks = risks ?? [];
+    const openRisks = allRisks.filter((r) => r.status === "open");
+    const estimatedExposure = openRisks.reduce((s: number, r: Record<string, unknown>) => s + Number(r.estimated_exposure ?? 0), 0);
+    const riskScore = Math.min(100, Math.round((openRisks.length / Math.max(totalTransactions, 1)) * 1000));
+    const riskLevel = riskScore > 60 ? "high" : riskScore > 30 ? "medium" : "low";
+    const catMap: Record<string, { count: number; exposure: number }> = {};
+    const sevMap: Record<string, number> = {};
+    for (const r of allRisks) {
+      const cat = (r.category as string) ?? "Other";
+      if (!catMap[cat]) catMap[cat] = { count: 0, exposure: 0 };
+      catMap[cat].count++; catMap[cat].exposure += Number(r.estimated_exposure ?? 0);
+      const sev = (r.severity as string) ?? "low";
+      sevMap[sev] = (sevMap[sev] ?? 0) + 1;
     }
-    const risksByCategory = Object.entries(categoryMap).map(([category, v]) => ({
-      category,
-      count: v.count,
-      exposure: v.exposure,
-    }));
-    const severityBreakdown = Object.entries(severityMap).map(([severity, count]) => ({ severity, count }));
-
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const monthlyExposure = months.map((m) => ({ month: m, exposure: Math.random() * 50000 }));
-
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     res.json({
-      totalTransactions,
-      openRisks,
-      estimatedExposure,
-      riskScore,
-      riskLevel,
-      risksByCategory,
-      severityBreakdown,
-      monthlyExposure,
+      totalTransactions, openRisks: openRisks.length, estimatedExposure, riskScore, riskLevel,
+      risksByCategory: Object.entries(catMap).map(([category, v]) => ({ category, count: v.count, exposure: v.exposure })),
+      severityBreakdown: Object.entries(sevMap).map(([severity, count]) => ({ severity, count })),
+      monthlyExposure: months.map((m) => ({ month: m, exposure: Math.round(Math.random() * 50000) })),
     });
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 export default router;
