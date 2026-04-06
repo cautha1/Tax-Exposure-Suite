@@ -21,8 +21,8 @@ export default function ClientDetail() {
     return <AppLayout><div className="p-8 text-center text-destructive">Company not found</div></AppLayout>;
   }
 
-  const formatCurrency = (val: number) => 
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
+  const formatCurrency = (val: number) =>
+    `UGX ${new Intl.NumberFormat('en-UG', { maximumFractionDigits: 0 }).format(val)}`;
 
   return (
     <AppLayout>

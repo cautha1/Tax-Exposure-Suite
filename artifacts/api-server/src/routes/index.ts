@@ -9,6 +9,8 @@ import dashboardRouter from "./dashboard";
 import uploadsRouter from "./uploads";
 import analysisRouter from "./analysis";
 import rulesRouter from "./rules";
+import aiRouter from "./ai";
+import riskScoreRouter from "./riskScore";
 
 const router: IRouter = Router();
 
@@ -22,5 +24,7 @@ router.use(dashboardRouter);
 router.use(uploadsRouter);
 router.use(analysisRouter);
 router.use(rulesRouter);
+router.use(aiRouter);
+router.use(riskScoreRouter);
 
 export default router;

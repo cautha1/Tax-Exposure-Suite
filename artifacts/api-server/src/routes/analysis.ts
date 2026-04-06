@@ -24,6 +24,8 @@ interface Transaction {
   transactionDate: string | null;
 }
 
+type Confidence = "high" | "medium" | "low";
+
 interface Flag {
   companyId: string;
   transactionId?: string;
@@ -34,6 +36,39 @@ interface Flag {
   estimatedExposure: string;
   status: "open";
   category: string;
+  confidence: Confidence;
+  riskScore: string;
+}
+
+function severityWeight(s: "high" | "medium" | "low"): number {
+  return s === "high" ? 3 : s === "medium" ? 2 : 1;
+}
+
+function exposureWeight(exposure: number): number {
+  if (exposure > 20_000_000) return 4;
+  if (exposure >= 5_000_000) return 3;
+  if (exposure >= 500_000) return 2;
+  return 1;
+}
+
+function confidenceWeight(c: Confidence): number {
+  return c === "high" ? 1.5 : c === "medium" ? 1 : 0.5;
+}
+
+function computeRiskScore(severity: "high" | "medium" | "low", exposure: number, confidence: Confidence): number {
+  return Math.round(severityWeight(severity) * exposureWeight(exposure) * confidenceWeight(confidence) * 10) / 10;
+}
+
+function makeFlag(
+  base: Omit<Flag, "confidence" | "riskScore">,
+  confidence: Confidence
+): Flag {
+  const exposure = Number(base.estimatedExposure);
+  return {
+    ...base,
+    confidence,
+    riskScore: String(computeRiskScore(base.severity, exposure, confidence)),
+  };
 }
 
 function runVatRules(tx: Transaction, rules: Set<string>, thresholds: Record<string, number>): Flag[] {
@@ -42,12 +77,12 @@ function runVatRules(tx: Transaction, rules: Set<string>, thresholds: Record<str
   const vat = Number(tx.vatAmount ?? 0);
 
   if (rules.has("VAT-001") && tx.taxType === "VAT" && vat === 0 && amt > 0) {
-    flags.push({
+    flags.push(makeFlag({
       companyId: tx.companyId, transactionId: tx.id,
       ruleCode: "VAT-001", riskType: "VAT",
       description: `Taxable transaction with zero VAT recorded (Uganda rate 18%): ${tx.description ?? tx.reference ?? "Unknown"}`,
       severity: "high", estimatedExposure: String(amt * UG_VAT_RATE), status: "open", category: "VAT",
-    });
+    }, "high"));
   }
 
   if (rules.has("VAT-002") && tx.taxType === "VAT" && vat > 0 && amt > 0) {
@@ -55,23 +90,24 @@ function runVatRules(tx: Transaction, rules: Set<string>, thresholds: Record<str
     const tolerance = 0.02;
     if (vatRate < UG_VAT_RATE - tolerance || vatRate > UG_VAT_RATE + tolerance) {
       const diff = Math.abs(vat - amt * UG_VAT_RATE);
-      flags.push({
+      const sev: "high" | "medium" = vatRate < 0.05 ? "high" : "medium";
+      flags.push(makeFlag({
         companyId: tx.companyId, transactionId: tx.id,
         ruleCode: "VAT-002", riskType: "VAT",
         description: `VAT rate ${(vatRate * 100).toFixed(1)}% deviates from Uganda standard 18% on: ${tx.description ?? tx.reference ?? "Unknown"}`,
-        severity: vatRate < 0.05 ? "high" : "medium",
+        severity: sev,
         estimatedExposure: String(diff), status: "open", category: "VAT",
-      });
+      }, "high"));
     }
   }
 
   if (rules.has("VAT-003") && !tx.taxType && amt > (thresholds["VAT-003"] ?? 1000000)) {
-    flags.push({
+    flags.push(makeFlag({
       companyId: tx.companyId, transactionId: tx.id,
       ruleCode: "VAT-003", riskType: "VAT",
       description: `Large transaction with no tax classification — may be VAT-liable at 18%: ${tx.description ?? tx.reference ?? "Unknown"} (UGX ${amt.toLocaleString()})`,
       severity: "low", estimatedExposure: String(amt * UG_VAT_RATE), status: "open", category: "VAT",
-    });
+    }, "high"));
   }
 
   return flags;
@@ -86,33 +122,33 @@ function runWhtRules(tx: Transaction, rules: Set<string>, thresholds: Record<str
   const likelyWHT = whtCats.some(k => cat.includes(k));
 
   if (rules.has("WHT-001") && tx.taxType === "WHT" && wht === 0 && amt > 0) {
-    flags.push({
+    flags.push(makeFlag({
       companyId: tx.companyId, transactionId: tx.id,
       ruleCode: "WHT-001", riskType: "Withholding Tax",
       description: `Transaction marked WHT with no withholding amount (Uganda rate 15%): ${tx.description ?? tx.reference ?? "Unknown"}`,
       severity: "high", estimatedExposure: String(amt * UG_WHT_RATE), status: "open", category: "Withholding Tax",
-    });
+    }, "high"));
   }
 
   if (rules.has("WHT-002") && likelyWHT && wht === 0 && amt > (thresholds["WHT-002"] ?? 500000)) {
-    flags.push({
+    flags.push(makeFlag({
       companyId: tx.companyId, transactionId: tx.id,
       ruleCode: "WHT-002", riskType: "Withholding Tax",
       description: `Service/professional payment with no WHT deducted (Uganda WHT 15%): ${tx.description ?? tx.vendorName ?? "Unknown"} (UGX ${amt.toLocaleString()})`,
       severity: "high", estimatedExposure: String(amt * UG_WHT_RATE), status: "open", category: "Withholding Tax",
-    });
+    }, "high"));
   }
 
   if (rules.has("WHT-003") && wht > 0 && amt > 0) {
     const whtRate = wht / amt;
     const tolerance = 0.02;
     if (whtRate > UG_WHT_RATE + tolerance) {
-      flags.push({
+      flags.push(makeFlag({
         companyId: tx.companyId, transactionId: tx.id,
         ruleCode: "WHT-003", riskType: "Withholding Tax",
         description: `WHT rate ${(whtRate * 100).toFixed(1)}% exceeds Uganda statutory 15% on: ${tx.description ?? tx.reference ?? "Unknown"}`,
         severity: "medium", estimatedExposure: String(Math.abs(wht - amt * UG_WHT_RATE)), status: "open", category: "Withholding Tax",
-      });
+      }, "medium"));
     }
   }
 
@@ -128,13 +164,13 @@ function runPayeRules(tx: Transaction, rules: Set<string>, thresholds: Record<st
   const isPayroll = payeCats.some(k => cat.includes(k) || desc.includes(k));
 
   if (rules.has("PAYE-001") && isPayroll && tx.taxType !== "PAYE" && amt > (thresholds["PAYE-001"] ?? 100000)) {
-    flags.push({
+    flags.push(makeFlag({
       companyId: tx.companyId, transactionId: tx.id,
       ruleCode: "PAYE-001", riskType: "PAYE",
       description: `Payroll/salary payment with no PAYE recorded (Uganda top marginal rate 30%): ${tx.description ?? tx.vendorName ?? "Unknown"} (UGX ${amt.toLocaleString()})`,
       severity: "high", estimatedExposure: String(amt * UG_PAYE_TOP_RATE),
       status: "open", category: "PAYE",
-    });
+    }, "high"));
   }
 
   return flags;
@@ -150,21 +186,21 @@ function runExpenseRules(tx: Transaction, rules: Set<string>, thresholds: Record
   const isNonDeductible = nonDeductible.some(k => cat.includes(k));
 
   if (rules.has("EXP-001") && isExpense && amt > (thresholds["EXP-001"] ?? 50000000)) {
-    flags.push({
+    flags.push(makeFlag({
       companyId: tx.companyId, transactionId: tx.id,
       ruleCode: "EXP-001", riskType: "Expense",
       description: `Unusually large expense — review for tax deductibility: ${tx.description ?? tx.vendorName ?? "Unknown"} (UGX ${amt.toLocaleString()})`,
       severity: "high", estimatedExposure: String(amt * 0.30), status: "open", category: "Expense",
-    });
+    }, "medium"));
   }
 
   if (rules.has("EXP-002") && isNonDeductible && amt > 0) {
-    flags.push({
+    flags.push(makeFlag({
       companyId: tx.companyId, transactionId: tx.id,
       ruleCode: "EXP-002", riskType: "Expense",
       description: `Potentially non-deductible expense under Uganda tax law (${tx.accountCategory}): ${tx.description ?? tx.vendorName ?? "Unknown"} (UGX ${amt.toLocaleString()})`,
       severity: "medium", estimatedExposure: String(amt * 0.30), status: "open", category: "Expense",
-    });
+    }, "medium"));
   }
 
   if (rules.has("EXP-003") && isExpense) {
@@ -176,12 +212,12 @@ function runExpenseRules(tx: Transaction, rules: Set<string>, thresholds: Record
       t.vendorName
     );
     if (dupes.length > 0 && tx.id < (dupes[0]?.id ?? "")) {
-      flags.push({
+      flags.push(makeFlag({
         companyId: tx.companyId, transactionId: tx.id,
         ruleCode: "EXP-003", riskType: "Expense",
         description: `Possible duplicate expense — same vendor, amount, and date: ${tx.description ?? tx.vendorName ?? "Unknown"} (UGX ${amt.toLocaleString()}) on ${tx.transactionDate}`,
         severity: "medium", estimatedExposure: String(amt), status: "open", category: "Expense",
-      });
+      }, "medium"));
     }
   }
 
@@ -197,21 +233,21 @@ function runRevenueRules(tx: Transaction, rules: Set<string>, thresholds: Record
   const isRevenue = revenueCats.some(k => cat.includes(k)) || type === "credit";
 
   if (rules.has("REV-001") && isRevenue && amt > (thresholds["REV-001"] ?? 500000000)) {
-    flags.push({
+    flags.push(makeFlag({
       companyId: tx.companyId, transactionId: tx.id,
       ruleCode: "REV-001", riskType: "Revenue",
       description: `Very large revenue transaction — confirm correct tax treatment: ${tx.description ?? tx.customerName ?? "Unknown"} (UGX ${amt.toLocaleString()})`,
       severity: "medium", estimatedExposure: String(amt * UG_VAT_RATE), status: "open", category: "Revenue",
-    });
+    }, "medium"));
   }
 
   if (rules.has("REV-002") && isRevenue && !tx.taxType) {
-    flags.push({
+    flags.push(makeFlag({
       companyId: tx.companyId, transactionId: tx.id,
       ruleCode: "REV-002", riskType: "Revenue",
       description: `Revenue transaction with no tax classification — verify VAT liability at 18%: ${tx.description ?? tx.customerName ?? "Unknown"} (UGX ${amt.toLocaleString()})`,
       severity: "low", estimatedExposure: String(amt * UG_VAT_RATE), status: "open", category: "Revenue",
-    });
+    }, "medium"));
   }
 
   return flags;
@@ -275,10 +311,15 @@ router.post("/analysis/run", async (req, res) => {
       catMap[f.category].exposure += Number(f.estimatedExposure);
     }
 
+    // Company score = sum of per-flag weighted scores normalised to 0–100.
+    // Max per-flag score = severityWeight(high=3) × exposureWeight(>20M=4) × confidenceWeight(high=1.5) = 18.
+    // Normalise by transaction count so one large batch doesn't inflate the score unfairly.
+    const MAX_FLAG_SCORE = 18;
+    const sumFlagScores = allFlags.reduce((s, f) => s + Number(f.riskScore), 0);
     const riskScore = Math.min(100, Math.round(
-      (highCount * 10 + medCount * 5 + lowCount * 1) / Math.max(allTx.length, 1) * 10
+      (sumFlagScores / Math.max(allTx.length, 1)) * (100 / MAX_FLAG_SCORE)
     ));
-    const riskLevel = riskScore > 60 ? "high" : riskScore > 30 ? "medium" : "low";
+    const riskLevel = riskScore > 75 ? "critical" : riskScore > 50 ? "high" : riskScore > 20 ? "medium" : "low";
 
     await db.update(companiesTable).set({
       openFlagsCount: allFlags.length,

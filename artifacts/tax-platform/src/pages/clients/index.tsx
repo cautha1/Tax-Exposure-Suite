@@ -44,8 +44,10 @@ export default function Clients() {
   };
 
   const getRiskColor = (level?: string | null) => {
-    if (level === 'High') return 'bg-rose-100 text-rose-700 border-rose-200';
-    if (level === 'Medium') return 'bg-amber-100 text-amber-700 border-amber-200';
+    const l = level?.toLowerCase();
+    if (l === 'critical') return 'bg-purple-100 text-purple-800 border-purple-300';
+    if (l === 'high') return 'bg-rose-100 text-rose-700 border-rose-200';
+    if (l === 'medium') return 'bg-amber-100 text-amber-700 border-amber-200';
     return 'bg-emerald-100 text-emerald-700 border-emerald-200';
   };
 

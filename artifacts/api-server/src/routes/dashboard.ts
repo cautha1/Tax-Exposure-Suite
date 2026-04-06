@@ -18,7 +18,7 @@ router.get("/dashboard/stats", async (req, res) => {
     ]);
 
     const estimatedExposure = openFlags.reduce((s, r) => s + Number(r.exposure ?? 0), 0);
-    const highRiskCompanies = companies.filter(c => c.riskLevel === "high").length;
+    const highRiskCompanies = companies.filter(c => c.riskLevel === "high" || c.riskLevel === "critical").length;
 
     res.json({
       totalClients: Number(totalClients),
@@ -115,7 +115,7 @@ router.get("/dashboard/advisor", async (req, res) => {
     ]);
 
     const estimatedExposure = allFlags.reduce((s, r) => s + Number(r.estimatedExposure ?? 0), 0);
-    const highRisk = allCompanies.filter(c => c.riskLevel === "high");
+    const highRisk = allCompanies.filter(c => c.riskLevel === "high" || c.riskLevel === "critical");
     const companyMap = Object.fromEntries(allCompanies.map(c => [c.id, c.companyName]));
 
     const recentAlerts = allFlags
@@ -129,6 +129,7 @@ router.get("/dashboard/advisor", async (req, res) => {
       estimatedExposure,
       highRiskClients: highRisk.length,
       riskDistribution: {
+        critical: allCompanies.filter(c => c.riskLevel === "critical").length,
         high: allCompanies.filter(c => c.riskLevel === "high").length,
         medium: allCompanies.filter(c => c.riskLevel === "medium").length,
         low: allCompanies.filter(c => !c.riskLevel || c.riskLevel === "low").length,

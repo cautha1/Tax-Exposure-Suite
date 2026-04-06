@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { AppLayout } from '@/components/layout';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { ShieldAlert, CheckCircle2, AlertCircle, Eye, Search, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { ShieldAlert, CheckCircle2, AlertCircle, Eye, Search, ChevronDown, ChevronUp, X, Lightbulb, StickyNote, Loader2 } from 'lucide-react';
 
 const STATUS_TABS = [
   { key: 'open',     label: 'Open' },
@@ -47,6 +47,270 @@ interface Risk {
   estimatedExposure?: number | null; status?: string | null;
   category?: string | null; reviewedAt?: string | null;
   reviewedBy?: string | null; reviewNotes?: string | null;
+  riskScore?: number | null; internalNote?: string | null;
+  resolvedBy?: string | null; resolvedAt?: string | null;
+}
+
+interface ExplainResult {
+  summary: string;
+  whyRisk: string;
+  exposure: string;
+  recommendation: string;
+}
+
+function RiskCard({ risk, onAction }: { risk: Risk; onAction: (id: string, action: 'review' | 'resolve') => Promise<void> }) {
+  const [isActioning, setIsActioning] = useState(false);
+  const [showExplain, setShowExplain] = useState(false);
+  const [explanation, setExplanation] = useState<ExplainResult | null>(null);
+  const [loadingExplain, setLoadingExplain] = useState(false);
+  const [showNote, setShowNote] = useState(false);
+  const [noteText, setNoteText] = useState(risk.internalNote ?? '');
+  const [savingNote, setSavingNote] = useState(false);
+  const [savedNote, setSavedNote] = useState(risk.internalNote ?? '');
+
+  const queryClient = useQueryClient();
+
+  const sev = SEVERITY_COLORS[risk.severity ?? 'low'] ?? SEVERITY_COLORS.low;
+  const statusInfo = STATUS_INFO[risk.status ?? 'open'] ?? STATUS_INFO.open;
+  const riskTypeColor = RISK_TYPE_COLORS[risk.riskType ?? ''] ?? 'bg-muted text-muted-foreground';
+
+  const formatCurrency = (val?: number | null) =>
+    val != null ? `UGX ${new Intl.NumberFormat('en-UG').format(val)}` : '-';
+
+  const handleAction = async (action: 'review' | 'resolve') => {
+    setIsActioning(true);
+    try {
+      await onAction(risk.id, action);
+    } finally {
+      setIsActioning(false);
+    }
+  };
+
+  const handleExplain = async () => {
+    if (showExplain) { setShowExplain(false); return; }
+    setShowExplain(true);
+    if (explanation) return;
+    setLoadingExplain(true);
+    try {
+      const result = await api.post<ExplainResult>('/ai/explain-risk', { riskId: risk.id });
+      setExplanation(result);
+    } catch {
+      setExplanation({
+        summary: 'Unable to load explanation at this time.',
+        whyRisk: '-', exposure: '-', recommendation: '-',
+      });
+    } finally {
+      setLoadingExplain(false);
+    }
+  };
+
+  const handleSaveNote = async () => {
+    setSavingNote(true);
+    try {
+      await api.patch(`/risks/${risk.id}/note`, { note: noteText });
+      setSavedNote(noteText);
+      queryClient.invalidateQueries({ queryKey: ['risks'] });
+    } finally {
+      setSavingNote(false);
+      setShowNote(false);
+    }
+  };
+
+  return (
+    <div className={`bg-card rounded-2xl border shadow-sm hover:shadow-md transition-all overflow-hidden ${sev.border}`}>
+      <div className="p-5">
+        <div className="flex flex-col md:flex-row gap-4 md:items-start">
+          <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${sev.bg} ${sev.text} border ${sev.border}`}>
+            <AlertCircle className="w-5 h-5" />
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              {risk.riskType && (
+                <span className={`px-2 py-0.5 rounded-md text-xs font-bold uppercase tracking-wider ${riskTypeColor}`}>
+                  {risk.riskType}
+                </span>
+              )}
+              <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider border ${sev.badge}`}>
+                {risk.severity}
+              </span>
+              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${statusInfo.cls}`}>
+                {statusInfo.label}
+              </span>
+              {risk.ruleCode && (
+                <span className="px-2 py-0.5 rounded bg-muted text-muted-foreground font-mono text-xs">
+                  {risk.ruleCode}
+                </span>
+              )}
+              {risk.riskScore != null && (
+                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-xs font-semibold border border-slate-200">
+                  Score: {risk.riskScore}
+                </span>
+              )}
+            </div>
+
+            <p className="text-sm font-medium text-foreground leading-snug mb-2">{risk.description}</p>
+
+            {savedNote && (
+              <div className="mb-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-start gap-1.5">
+                <StickyNote className="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-500" />
+                <span className="italic">"{savedNote}"</span>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              {risk.companyName && <span className="font-semibold text-foreground">{risk.companyName}</span>}
+              {risk.category && <span>Category: {risk.category}</span>}
+              {risk.reviewedAt && (
+                <span>
+                  {risk.status === 'reviewed' ? 'Reviewed' : 'Actioned'}: {new Date(risk.reviewedAt).toLocaleDateString()}
+                </span>
+              )}
+              {risk.resolvedAt && (
+                <span>Resolved: {new Date(risk.resolvedAt).toLocaleDateString()}</span>
+              )}
+              {risk.reviewedBy && (
+                <span className="flex items-center gap-1">
+                  By: <span className="font-medium text-foreground">{risk.reviewedBy}</span>
+                </span>
+              )}
+              {risk.reviewNotes && <span className="italic">"{risk.reviewNotes}"</span>}
+            </div>
+
+            <div className="flex gap-2 mt-3 flex-wrap">
+              <button
+                onClick={handleExplain}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all border ${
+                  showExplain
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                }`}
+              >
+                <Lightbulb className="w-3.5 h-3.5" />
+                {showExplain ? 'Hide Explanation' : 'Explain Risk'}
+              </button>
+              <button
+                onClick={() => setShowNote(v => !v)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-all"
+              >
+                <StickyNote className="w-3.5 h-3.5" />
+                {showNote ? 'Cancel' : savedNote ? 'Edit Note' : 'Add Note'}
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-row md:flex-col items-center md:items-end justify-between gap-3 shrink-0 md:w-44 md:border-l md:border-border md:pl-5">
+            <div className="md:text-right">
+              <p className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider">Est. Exposure</p>
+              <p className="text-base font-bold text-foreground">{formatCurrency(risk.estimatedExposure)}</p>
+            </div>
+
+            {(risk.status === 'open' || risk.status === 'reviewed') && (
+              <div className="flex flex-col gap-2 w-full">
+                {risk.status === 'open' && (
+                  <button
+                    onClick={() => handleAction('review')}
+                    disabled={isActioning}
+                    className="px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg text-xs font-semibold hover:bg-amber-100 transition-all flex items-center gap-1.5 disabled:opacity-50 justify-center w-full"
+                  >
+                    <Eye className="w-3.5 h-3.5" /> Mark Reviewed
+                  </button>
+                )}
+                <button
+                  onClick={() => handleAction('resolve')}
+                  disabled={isActioning}
+                  className="px-3 py-1.5 bg-background border-2 border-border text-foreground rounded-lg text-xs font-semibold hover:border-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 transition-all flex items-center gap-1.5 disabled:opacity-50 justify-center w-full"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Resolve
+                </button>
+              </div>
+            )}
+
+            {risk.status === 'resolved' && (
+              <span className="px-3 py-1.5 bg-emerald-50 rounded-lg text-xs font-semibold text-emerald-700 flex items-center gap-1.5 border border-emerald-200">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Resolved
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {showNote && (
+        <div className="px-5 pb-4 border-t border-border bg-amber-50/30">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-3 mb-2">Internal Note</p>
+          <textarea
+            value={noteText}
+            onChange={e => setNoteText(e.target.value)}
+            rows={3}
+            placeholder="Add an internal note about this risk flag..."
+            className="w-full px-3 py-2 bg-background border border-input rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-none"
+          />
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={handleSaveNote}
+              disabled={savingNote}
+              className="px-4 py-1.5 bg-primary text-white rounded-lg text-xs font-semibold hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {savingNote && <Loader2 className="w-3 h-3 animate-spin" />}
+              Save Note
+            </button>
+            <button
+              onClick={() => { setNoteText(savedNote); setShowNote(false); }}
+              className="px-4 py-1.5 bg-muted text-muted-foreground rounded-lg text-xs font-semibold hover:bg-muted/80"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showExplain && (
+        <div className="px-5 pb-5 border-t border-indigo-100 bg-indigo-50/30">
+          {loadingExplain ? (
+            <div className="py-6 space-y-3">
+              <div className="h-4 bg-indigo-100 rounded animate-pulse w-3/4" />
+              <div className="h-4 bg-indigo-100 rounded animate-pulse w-full" />
+              <div className="h-4 bg-indigo-100 rounded animate-pulse w-5/6" />
+              <div className="h-4 bg-indigo-100 rounded animate-pulse w-2/3" />
+            </div>
+          ) : explanation && (
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <ExplainSection title="Issue Summary" color="indigo" content={explanation.summary} />
+              <ExplainSection title="Why It's a Risk" color="rose" content={explanation.whyRisk} />
+              <ExplainSection title="Estimated Exposure" color="amber" content={explanation.exposure} />
+              <ExplainSection title="Recommended Actions" color="emerald" content={explanation.recommendation} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExplainSection({ title, color, content }: { title: string; color: string; content: string }) {
+  const colorMap: Record<string, { bg: string; border: string; label: string; title: string }> = {
+    indigo: { bg: 'bg-indigo-50', border: 'border-indigo-200', label: 'bg-indigo-100 text-indigo-700', title: 'text-indigo-700' },
+    rose:   { bg: 'bg-rose-50',   border: 'border-rose-200',   label: 'bg-rose-100 text-rose-700',     title: 'text-rose-700' },
+    amber:  { bg: 'bg-amber-50',  border: 'border-amber-200',  label: 'bg-amber-100 text-amber-700',   title: 'text-amber-700' },
+    emerald:{ bg: 'bg-emerald-50',border: 'border-emerald-200',label: 'bg-emerald-100 text-emerald-700',title: 'text-emerald-700' },
+  };
+  const c = colorMap[color] ?? colorMap.indigo;
+  const lines = content.split('\n').filter(Boolean);
+
+  return (
+    <div className={`rounded-xl border p-4 ${c.bg} ${c.border}`}>
+      <p className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${c.title}`}>{title}</p>
+      {lines.length > 1 ? (
+        <ul className="space-y-1">
+          {lines.map((line, i) => (
+            <li key={i} className="text-xs text-foreground leading-relaxed">{line}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-foreground leading-relaxed">{content}</p>
+      )}
+    </div>
+  );
 }
 
 export default function Risks() {
@@ -55,7 +319,6 @@ export default function Risks() {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [severityFilter, setSeverityFilter] = useState('');
   const [showFilters, setShowFilters] = useState(false);
-  const [actioningId, setActioningId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const debouncedSearch = useDebounce(search, 300);
@@ -79,13 +342,8 @@ export default function Risks() {
     val != null ? `UGX ${new Intl.NumberFormat('en-UG').format(val)}` : '-';
 
   const handleAction = useCallback(async (id: string, action: 'review' | 'resolve') => {
-    setActioningId(id);
-    try {
-      await api.post(`/risks/${id}/${action}`, {});
-      queryClient.invalidateQueries({ queryKey: ['risks'] });
-    } finally {
-      setActioningId(null);
-    }
+    await api.post(`/risks/${id}/${action}`, {});
+    queryClient.invalidateQueries({ queryKey: ['risks'] });
   }, [queryClient]);
 
   const risks = data?.data ?? [];
@@ -200,95 +458,9 @@ export default function Risks() {
               <p className="text-sm mt-1">Try changing the filters or run analysis on a company.</p>
             </div>
           ) : (
-            risks.map((risk) => {
-              const sev = SEVERITY_COLORS[risk.severity ?? 'low'] ?? SEVERITY_COLORS.low;
-              const statusInfo = STATUS_INFO[risk.status ?? 'open'] ?? STATUS_INFO.open;
-              const riskTypeColor = RISK_TYPE_COLORS[risk.riskType ?? ''] ?? 'bg-muted text-muted-foreground';
-              const isActioning = actioningId === risk.id;
-
-              return (
-                <div key={risk.id} className="bg-card rounded-2xl border border-border/60 shadow-sm p-5 hover:shadow-md transition-all">
-                  <div className="flex flex-col md:flex-row gap-4 md:items-start">
-                    <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${sev.bg} ${sev.text} border ${sev.border}`}>
-                      <AlertCircle className="w-5 h-5" />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2 mb-2">
-                        {risk.riskType && (
-                          <span className={`px-2 py-0.5 rounded-md text-xs font-bold uppercase tracking-wider ${riskTypeColor}`}>
-                            {risk.riskType}
-                          </span>
-                        )}
-                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider border ${sev.badge}`}>
-                          {risk.severity}
-                        </span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${statusInfo.cls}`}>
-                          {statusInfo.label}
-                        </span>
-                        {risk.ruleCode && (
-                          <span className="px-2 py-0.5 rounded bg-muted text-muted-foreground font-mono text-xs">
-                            {risk.ruleCode}
-                          </span>
-                        )}
-                      </div>
-
-                      <p className="text-sm font-medium text-foreground leading-snug mb-2">{risk.description}</p>
-
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                        {risk.companyName && <span className="font-semibold text-foreground">{risk.companyName}</span>}
-                        {risk.category && <span>Category: {risk.category}</span>}
-                        {risk.reviewedAt && (
-                          <span>
-                            {risk.status === 'reviewed' ? 'Reviewed' : 'Resolved'}: {new Date(risk.reviewedAt).toLocaleDateString()}
-                          </span>
-                        )}
-                        {risk.reviewedBy && (
-                          <span className="flex items-center gap-1">
-                            By: <span className="font-medium text-foreground">{risk.reviewedBy}</span>
-                          </span>
-                        )}
-                        {risk.reviewNotes && <span className="italic">"{risk.reviewNotes}"</span>}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-row md:flex-col items-center md:items-end justify-between gap-3 shrink-0 md:w-44 md:border-l md:border-border md:pl-5">
-                      <div className="md:text-right">
-                        <p className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider">Est. Exposure</p>
-                        <p className="text-base font-bold text-foreground">{formatCurrency(risk.estimatedExposure)}</p>
-                      </div>
-
-                      {(risk.status === 'open' || risk.status === 'reviewed') && (
-                        <div className="flex flex-col gap-2 w-full">
-                          {risk.status === 'open' && (
-                            <button
-                              onClick={() => handleAction(risk.id, 'review')}
-                              disabled={isActioning}
-                              className="px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg text-xs font-semibold hover:bg-amber-100 transition-all flex items-center gap-1.5 disabled:opacity-50 justify-center w-full"
-                            >
-                              <Eye className="w-3.5 h-3.5" /> Mark Reviewed
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleAction(risk.id, 'resolve')}
-                            disabled={isActioning}
-                            className="px-3 py-1.5 bg-background border-2 border-border text-foreground rounded-lg text-xs font-semibold hover:border-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 transition-all flex items-center gap-1.5 disabled:opacity-50 justify-center w-full"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" /> Resolve
-                          </button>
-                        </div>
-                      )}
-
-                      {risk.status === 'resolved' && (
-                        <span className="px-3 py-1.5 bg-emerald-50 rounded-lg text-xs font-semibold text-emerald-700 flex items-center gap-1.5 border border-emerald-200">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Resolved
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })
+            risks.map((risk) => (
+              <RiskCard key={risk.id} risk={risk} onAction={handleAction} />
+            ))
           )}
         </div>
 

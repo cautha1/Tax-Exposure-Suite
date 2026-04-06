@@ -1,18 +1,63 @@
 import { Router, type IRouter } from "express";
-import { db, taxRiskFlagsTable, companiesTable } from "../lib/db.js";
+import { db, taxRiskFlagsTable, companiesTable, transactionsTable } from "../lib/db.js";
 import { eq, and, gte, lte, ilike, or, count } from "drizzle-orm";
 
 const router: IRouter = Router();
 
-const fmtRisk = (r: typeof taxRiskFlagsTable.$inferSelect, companyName?: string) => ({
-  id: r.id, companyId: r.companyId, transactionId: r.transactionId ?? null,
-  ruleCode: r.ruleCode ?? null, riskType: r.riskType ?? null,
-  description: r.description ?? null, severity: r.severity ?? null,
-  estimatedExposure: r.estimatedExposure ? Number(r.estimatedExposure) : null,
-  status: r.status ?? null, category: r.category ?? null,
-  reviewedAt: r.reviewedAt ?? null, reviewedBy: r.reviewedBy ?? null,
+type RiskRow = typeof taxRiskFlagsTable.$inferSelect;
+
+const fmtRisk = (r: RiskRow, companyName?: string, transaction?: Record<string, unknown>) => ({
+  id: r.id,
+  companyId: r.companyId,
+  transactionId: r.transactionId ?? null,
+  ruleCode: r.ruleCode ?? null,
+  riskType: r.riskType ?? null,
+  description: r.description ?? null,
+  severity: r.severity ?? null,
+  estimatedExposure: r.estimatedExposure != null ? Number(r.estimatedExposure) : null,
+  status: r.status ?? null,
+  category: r.category ?? null,
+  confidence: r.confidence ?? null,
+  riskScore: r.riskScore != null ? Number(r.riskScore) : null,
+  reviewedAt: r.reviewedAt ?? null,
+  reviewedBy: r.reviewedBy ?? null,
   reviewNotes: r.reviewNotes ?? null,
-  companyName: companyName ?? null, createdAt: r.createdAt,
+  resolvedBy: r.resolvedBy ?? null,
+  resolvedAt: r.resolvedAt ?? null,
+  internalNote: r.internalNote ?? null,
+  companyName: companyName ?? null,
+  transaction: transaction ?? null,
+  createdAt: r.createdAt,
+});
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+router.get("/risks/summary", async (req, res) => {
+  try {
+    const { companyId } = req.query as Record<string, string>;
+    if (companyId && !UUID_RE.test(companyId)) {
+      res.json({ openCount: 0, reviewedCount: 0, resolvedCount: 0, totalExposure: 0 });
+      return;
+    }
+    const conditions = [];
+    if (companyId) conditions.push(eq(taxRiskFlagsTable.companyId, companyId));
+    const where = conditions.length ? and(...conditions) : undefined;
+
+    const rows = await db.select({
+      status: taxRiskFlagsTable.status,
+      exposure: taxRiskFlagsTable.estimatedExposure,
+    }).from(taxRiskFlagsTable).where(where);
+
+    let openCount = 0, reviewedCount = 0, resolvedCount = 0, totalExposure = 0;
+    for (const r of rows) {
+      totalExposure += Number(r.exposure ?? 0);
+      if (r.status === "open") openCount++;
+      else if (r.status === "reviewed") reviewedCount++;
+      else if (r.status === "resolved") resolvedCount++;
+    }
+
+    res.json({ openCount, reviewedCount, resolvedCount, totalExposure });
+  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 router.get("/risks", async (req, res) => {
@@ -52,9 +97,44 @@ router.get("/risks", async (req, res) => {
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
+router.get("/risks/:id", async (req, res) => {
+  try {
+    const [risk] = await db.select().from(taxRiskFlagsTable).where(eq(taxRiskFlagsTable.id, req.params.id)).limit(1);
+    if (!risk) { res.status(404).json({ error: "Not found" }); return; }
+
+    const [companyRow] = await db.select({
+      id: companiesTable.id,
+      companyName: companiesTable.companyName,
+      industry: companiesTable.industry,
+      country: companiesTable.country,
+      riskLevel: companiesTable.riskLevel,
+      riskScore: companiesTable.riskScore,
+    }).from(companiesTable).where(eq(companiesTable.id, risk.companyId)).limit(1);
+
+    let transaction: Record<string, unknown> | undefined;
+    if (risk.transactionId) {
+      const [tx] = await db.select().from(transactionsTable).where(eq(transactionsTable.id, risk.transactionId)).limit(1);
+      if (tx) transaction = tx as unknown as Record<string, unknown>;
+    }
+
+    const company = companyRow
+      ? {
+          id: companyRow.id,
+          companyName: companyRow.companyName,
+          industry: companyRow.industry ?? null,
+          country: companyRow.country ?? null,
+          riskLevel: companyRow.riskLevel ?? null,
+          riskScore: companyRow.riskScore != null ? Number(companyRow.riskScore) : null,
+        }
+      : null;
+
+    res.json({ ...fmtRisk(risk, companyRow?.companyName, transaction), company });
+  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
+});
+
 router.post("/risks/:id/review", async (req, res) => {
   try {
-    const userId = req.headers["x-user-id"] as string;
+    const userId = req.headers["x-user-id"] as string | undefined;
     const { reviewNotes } = req.body;
     const [risk] = await db.update(taxRiskFlagsTable).set({
       status: "reviewed",
@@ -70,12 +150,12 @@ router.post("/risks/:id/review", async (req, res) => {
 
 router.post("/risks/:id/resolve", async (req, res) => {
   try {
-    const userId = req.headers["x-user-id"] as string;
+    const userId = req.headers["x-user-id"] as string | undefined;
     const { reviewNotes } = req.body;
     const [risk] = await db.update(taxRiskFlagsTable).set({
       status: "resolved",
-      reviewedAt: new Date(),
-      reviewedBy: userId ?? null,
+      resolvedAt: new Date(),
+      resolvedBy: userId ?? null,
       reviewNotes: reviewNotes ?? null,
       updatedAt: new Date(),
     }).where(eq(taxRiskFlagsTable.id, req.params.id)).returning();
@@ -85,6 +165,19 @@ router.post("/risks/:id/resolve", async (req, res) => {
     if (co) {
       await db.update(companiesTable).set({ openFlagsCount: Math.max((co.ofc ?? 1) - 1, 0), updatedAt: new Date() }).where(eq(companiesTable.id, risk.companyId));
     }
+    res.json({ success: true, risk: fmtRisk(risk) });
+  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
+});
+
+router.patch("/risks/:id/note", async (req, res) => {
+  try {
+    const { note } = req.body;
+    if (typeof note !== "string") { res.status(400).json({ error: "note (string) is required" }); return; }
+    const [risk] = await db.update(taxRiskFlagsTable).set({
+      internalNote: note,
+      updatedAt: new Date(),
+    }).where(eq(taxRiskFlagsTable.id, req.params.id)).returning();
+    if (!risk) { res.status(404).json({ error: "Not found" }); return; }
     res.json({ success: true, risk: fmtRisk(risk) });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
