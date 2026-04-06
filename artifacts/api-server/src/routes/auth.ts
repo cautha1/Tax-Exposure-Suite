@@ -1,32 +1,31 @@
 import { Router, type IRouter } from "express";
-import { supabase, toCamel, sbErr } from "../lib/supabase.js";
-import bcrypt from "bcryptjs";
+import { supabase } from "../lib/supabase.js";
 
 const router: IRouter = Router();
 
-interface Profile {
+interface AuthUser {
   id: string;
-  email: string;
-  fullName: string | null;
-  passwordHash: string;
-  role: string | null;
-  companyId: string | null;
-  createdAt: string;
-  updatedAt: string;
+  email?: string;
+  user_metadata?: { full_name?: string; role?: string; company_id?: string };
+  created_at?: string;
 }
 
-const fmt = (u: Profile) => ({
-  id: u.id, email: u.email, fullName: u.fullName, role: u.role,
-  companyId: u.companyId ?? null, createdAt: u.createdAt,
+const fmt = (u: AuthUser) => ({
+  id: u.id,
+  email: u.email ?? null,
+  fullName: u.user_metadata?.full_name ?? null,
+  role: u.user_metadata?.role ?? "advisor",
+  companyId: u.user_metadata?.company_id ?? null,
+  createdAt: u.created_at ?? new Date().toISOString(),
 });
 
 router.get("/auth/me", async (req, res) => {
   const userId = req.headers["x-user-id"] as string;
   if (!userId) { res.status(401).json({ error: "Unauthorized" }); return; }
   try {
-    const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).single();
-    if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
-    res.json(fmt(toCamel<Profile>(data)));
+    const { data: { user }, error } = await supabase.auth.admin.getUserById(userId);
+    if (error || !user) { res.status(404).json({ error: "Not found" }); return; }
+    res.json(fmt(user));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
@@ -34,12 +33,12 @@ router.post("/auth/login", async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) { res.status(400).json({ error: "Email and password required" }); return; }
   try {
-    const { data, error } = await supabase.from("profiles").select("*").eq("email", email.toLowerCase()).maybeSingle();
-    if (error || !data) { res.status(401).json({ error: "Invalid credentials" }); return; }
-    const user = toCamel<Profile>(data);
-    const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) { res.status(401).json({ error: "Invalid credentials" }); return; }
-    res.json(fmt(user));
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.toLowerCase(),
+      password,
+    });
+    if (error || !data.user) { res.status(401).json({ error: "Invalid credentials" }); return; }
+    res.json(fmt(data.user));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
@@ -54,18 +53,25 @@ router.post("/auth/signup", async (req, res) => {
     return;
   }
   try {
-    const { data: existing } = await supabase.from("profiles").select("id").eq("email", email.toLowerCase()).maybeSingle();
-    if (existing) { res.status(400).json({ error: "An account with this email already exists" }); return; }
-
-    const passwordHash = await bcrypt.hash(password, 10);
     const allowed = ["advisor", "client_user", "admin"];
     const userRole = allowed.includes(role) ? role : "advisor";
 
-    const { data, error } = await supabase.from("profiles").insert({
-      email: email.toLowerCase(), full_name: fullName, role: userRole, password_hash: passwordHash, company_id: null,
-    }).select().single();
-    sbErr(error, "signup insert");
-    res.status(201).json(fmt(toCamel<Profile>(data)));
+    const { data, error } = await supabase.auth.admin.createUser({
+      email: email.toLowerCase(),
+      password,
+      user_metadata: { full_name: fullName, role: userRole },
+      email_confirm: true,
+    });
+
+    if (error) {
+      if (error.message.toLowerCase().includes("already") || error.message.toLowerCase().includes("duplicate")) {
+        res.status(400).json({ error: "An account with this email already exists" });
+        return;
+      }
+      throw new Error(error.message);
+    }
+
+    res.status(201).json(fmt(data.user));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
@@ -74,36 +80,39 @@ router.put("/profile", async (req, res) => {
   if (!userId) { res.status(401).json({ error: "Unauthorized" }); return; }
   try {
     const { fullName, email, role, currentPassword, newPassword } = req.body;
-    const { data: raw } = await supabase.from("profiles").select("*").eq("id", userId).single();
-    if (!raw) { res.status(404).json({ error: "User not found" }); return; }
-    const user = toCamel<Profile>(raw);
 
-    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    const { data: { user: current }, error: fetchErr } = await supabase.auth.admin.getUserById(userId);
+    if (fetchErr || !current) { res.status(404).json({ error: "User not found" }); return; }
 
-    if (fullName) updates.full_name = fullName;
+    const updates: Record<string, unknown> = {};
+    const metaUpdates = { ...current.user_metadata };
 
-    if (email && email !== user.email) {
-      const { data: taken } = await supabase.from("profiles").select("id").eq("email", email.toLowerCase()).maybeSingle();
-      if (taken) { res.status(400).json({ error: "Email already in use" }); return; }
-      updates.email = email.toLowerCase();
-    }
-
-    if (role && user.role === "admin") {
+    if (fullName) metaUpdates.full_name = fullName;
+    if (role && current.user_metadata?.role === "admin") {
       const allowed = ["advisor", "client_user", "admin"];
-      if (allowed.includes(role)) updates.role = role;
+      if (allowed.includes(role)) metaUpdates.role = role;
     }
 
     if (newPassword) {
       if (!currentPassword) { res.status(400).json({ error: "Current password required to set new password" }); return; }
-      const valid = await bcrypt.compare(currentPassword, user.passwordHash);
-      if (!valid) { res.status(401).json({ error: "Current password is incorrect" }); return; }
+      const { error: verifyErr } = await supabase.auth.signInWithPassword({
+        email: current.email!, password: currentPassword,
+      });
+      if (verifyErr) { res.status(401).json({ error: "Current password is incorrect" }); return; }
       if (newPassword.length < 6) { res.status(400).json({ error: "New password must be at least 6 characters" }); return; }
-      updates.password_hash = await bcrypt.hash(newPassword, 10);
+      updates.password = newPassword;
     }
 
-    const { data, error } = await supabase.from("profiles").update(updates).eq("id", userId).select().single();
-    sbErr(error, "profile update");
-    res.json(fmt(toCamel<Profile>(data)));
+    if (email && email.toLowerCase() !== current.email) {
+      updates.email = email.toLowerCase();
+    }
+
+    updates.user_metadata = metaUpdates;
+
+    const { data, error } = await supabase.auth.admin.updateUserById(userId, updates);
+    if (error) throw new Error(error.message);
+
+    res.json(fmt(data.user));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
