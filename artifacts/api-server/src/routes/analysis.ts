@@ -137,22 +137,6 @@ function runPayeRules(tx: Transaction, rules: Set<string>, thresholds: Record<st
     });
   }
 
-  if (rules.has("PAYE-002") && isPayroll && tx.taxType === "PAYE") {
-    const paye = Number(tx.vatAmount ?? 0);
-    if (paye > 0 && amt > 0) {
-      const payeRate = paye / amt;
-      if (payeRate > UG_PAYE_TOP_RATE + 0.02) {
-        flags.push({
-          companyId: tx.companyId, transactionId: tx.id,
-          ruleCode: "PAYE-002", riskType: "PAYE",
-          description: `PAYE rate ${(payeRate * 100).toFixed(1)}% exceeds Uganda maximum rate of 30% on: ${tx.description ?? "Unknown"}`,
-          severity: "medium", estimatedExposure: String(paye - amt * UG_PAYE_TOP_RATE),
-          status: "open", category: "PAYE",
-        });
-      }
-    }
-  }
-
   return flags;
 }
 
@@ -253,7 +237,7 @@ router.post("/analysis/run", async (req, res) => {
     const enabledRules = new Set<string>(
       rulesConfig.length > 0
         ? rulesConfig.map(r => r.ruleCode)
-        : ["VAT-001","VAT-002","VAT-003","WHT-001","WHT-002","WHT-003","PAYE-001","PAYE-002","EXP-001","EXP-002","EXP-003","REV-001","REV-002"]
+        : ["VAT-001","VAT-002","VAT-003","WHT-001","WHT-002","WHT-003","PAYE-001","EXP-001","EXP-002","EXP-003","REV-001","REV-002"]
     );
 
     const thresholds: Record<string, number> = Object.fromEntries(

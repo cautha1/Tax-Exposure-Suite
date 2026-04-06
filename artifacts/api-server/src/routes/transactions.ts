@@ -145,13 +145,13 @@ router.post("/transactions/upload", async (req, res) => {
         const isService = ["services","professional","consulting","contractor","commission"].some(k => cat.includes(k));
 
         if (t.taxType === "VAT" && vat === 0 && amt > 0) {
-          newFlags.push({ companyId, ruleCode: "VAT-001", riskType: "VAT", description: `Zero VAT on taxable transaction: ${t.description ?? t.reference ?? "Unknown"}`, severity: "high", estimatedExposure: String(amt * 0.075), status: "open", category: "VAT" });
+          newFlags.push({ companyId, ruleCode: "VAT-001", riskType: "VAT", description: `Zero VAT on taxable transaction (Uganda rate 18%): ${t.description ?? t.reference ?? "Unknown"}`, severity: "high", estimatedExposure: String(amt * 0.18), status: "open", category: "VAT" });
         }
         if (t.taxType === "WHT" && wht === 0 && amt > 0) {
-          newFlags.push({ companyId, ruleCode: "WHT-001", riskType: "Withholding Tax", description: `Missing WHT on WHT-type transaction: ${t.description ?? "Unknown"}`, severity: "high", estimatedExposure: String(amt * 0.05), status: "open", category: "Withholding Tax" });
+          newFlags.push({ companyId, ruleCode: "WHT-001", riskType: "Withholding Tax", description: `Missing WHT on WHT-type transaction (Uganda rate 15%): ${t.description ?? "Unknown"}`, severity: "high", estimatedExposure: String(amt * 0.15), status: "open", category: "Withholding Tax" });
         }
-        if (isService && wht === 0 && amt > 500) {
-          newFlags.push({ companyId, ruleCode: "WHT-002", riskType: "Withholding Tax", description: `Service payment with no WHT: ${t.vendorName ?? t.description ?? "Unknown"} ($${amt.toFixed(2)})`, severity: "high", estimatedExposure: String(amt * 0.05), status: "open", category: "Withholding Tax" });
+        if (isService && wht === 0 && amt > 500000) {
+          newFlags.push({ companyId, ruleCode: "WHT-002", riskType: "Withholding Tax", description: `Service payment with no WHT deducted (Uganda WHT 15%): ${t.vendorName ?? t.description ?? "Unknown"} (UGX ${amt.toLocaleString()})`, severity: "high", estimatedExposure: String(amt * 0.15), status: "open", category: "Withholding Tax" });
         }
       }
 

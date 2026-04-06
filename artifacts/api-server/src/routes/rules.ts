@@ -12,7 +12,6 @@ export const DEFAULT_RULES = [
   { ruleCode: "WHT-002", ruleName: "Service Payment Without WHT", category: "Withholding Tax", description: "Service/professional/dividend/rent payments above threshold with no 15% WHT.", enabled: true, threshold: 500000 },
   { ruleCode: "WHT-003", ruleName: "Excessive WHT Rate", category: "Withholding Tax", description: "Withholding tax rate more than 2% above Uganda statutory 15%.", enabled: true, threshold: null },
   { ruleCode: "PAYE-001", ruleName: "Payroll Without PAYE", category: "PAYE", description: "Payroll/salary transactions above threshold with no PAYE recorded. Uganda top marginal rate: 30%.", enabled: true, threshold: 100000 },
-  { ruleCode: "PAYE-002", ruleName: "Excessive PAYE Rate", category: "PAYE", description: "PAYE deducted exceeds Uganda's maximum marginal rate of 30%.", enabled: true, threshold: null },
   { ruleCode: "EXP-001", ruleName: "Unusually Large Expense", category: "Expense", description: "Single expense transaction above defined threshold — review for deductibility under Uganda ITA.", enabled: true, threshold: 50000000 },
   { ruleCode: "EXP-002", ruleName: "Non-Deductible Expense", category: "Expense", description: "Expenses in categories typically disallowed under Uganda Income Tax Act (entertainment, gifts, fines, etc.).", enabled: true, threshold: null },
   { ruleCode: "EXP-003", ruleName: "Duplicate Expense", category: "Expense", description: "Same vendor, amount, and date appearing more than once — potential double-counting.", enabled: true, threshold: null },
