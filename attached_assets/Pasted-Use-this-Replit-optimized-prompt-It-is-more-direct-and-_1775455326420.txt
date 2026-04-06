@@ -1,0 +1,633 @@
+Use this **Replit-optimized prompt**. It is more direct and implementation-focused so Replit Agent is more likely to actually build the backend instead of only describing it.
+
+---
+
+## Replit Prompt — Python Backend Logic for Tax Exposure Platform
+
+You are a senior **Python backend engineer** building the backend for a SaaS product called:
+
+# Tax Exposure Intelligence Platform
+
+Build a **working FastAPI backend** for this platform.
+
+The frontend already exists or is being built separately.
+Your job is to create the **Python logic and API endpoints** that make all major button functions work.
+
+## Core architecture
+
+Use:
+
+* **Python**
+* **FastAPI**
+* **Pydantic**
+* **Supabase Python client**
+* **Pandas** for CSV parsing
+* **Uvicorn**
+* modular service-based architecture
+
+Supabase is the backend system of record for:
+
+* authentication
+* Postgres database
+* storage
+
+The Python backend must connect to Supabase and provide the **application/business logic layer**.
+
+Do not build a separate database.
+Use Supabase tables and storage only.
+
+---
+
+# Main goal
+
+Build the backend logic for the platform actions so the frontend buttons work.
+
+I want real API endpoints and Python services for:
+
+* create company
+* edit company
+* upload CSV
+* parse CSV
+* insert transactions into Supabase
+* run tax exposure analysis
+* create risk flags
+* generate reports
+* fetch dashboard summaries
+* filter risks
+* filter transactions
+* update profile
+* mark risks as reviewed or resolved
+
+---
+
+# Product context
+
+This is a B2B SaaS platform for:
+
+* tax advisory firms
+* audit firms
+* finance teams
+
+Purpose:
+Help identify **tax exposure and compliance risks before an audit happens**.
+
+Users:
+
+* admin
+* advisor
+* client_user
+
+Supabase tables already exist or will exist:
+
+* profiles
+* companies
+* company_users
+* uploads
+* transactions
+* tax_risk_flags
+* reports
+* optional_rules_config
+
+The Python backend must use these Supabase tables.
+
+---
+
+# Required folder structure
+
+Create the backend with this structure:
+
+```text
+app/
+  main.py
+  core/
+    config.py
+    deps.py
+    logging.py
+  api/
+    routes/
+      companies.py
+      uploads.py
+      transactions.py
+      risks.py
+      reports.py
+      dashboard.py
+      profiles.py
+  services/
+    supabase_service.py
+    company_service.py
+    upload_service.py
+    transaction_service.py
+    analysis_service.py
+    report_service.py
+    dashboard_service.py
+    profile_service.py
+  models/
+    schemas.py
+  utils/
+    csv_parser.py
+    validators.py
+    calculations.py
+requirements.txt
+.env.example
+README.md
+```
+
+Keep the code clean and production-style.
+
+---
+
+# Environment variables
+
+Create `.env.example` with:
+
+```env
+SUPABASE_URL=
+SUPABASE_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_STORAGE_BUCKET=uploads
+APP_ENV=development
+APP_HOST=0.0.0.0
+APP_PORT=8000
+```
+
+Use a config module to load environment variables safely.
+
+---
+
+# API endpoints to build
+
+## Companies
+
+* `POST /api/companies`
+* `PUT /api/companies/{company_id}`
+* `GET /api/companies`
+* `GET /api/companies/{company_id}`
+
+## Uploads
+
+* `POST /api/companies/{company_id}/upload`
+
+## Transactions
+
+* `GET /api/companies/{company_id}/transactions`
+
+## Analysis
+
+* `POST /api/companies/{company_id}/analyse`
+
+## Risks
+
+* `GET /api/companies/{company_id}/risks`
+* `PATCH /api/risks/{risk_id}/review`
+* `PATCH /api/risks/{risk_id}/resolve`
+
+## Reports
+
+* `POST /api/companies/{company_id}/generate-report`
+* `GET /api/companies/{company_id}/reports`
+* `GET /api/reports/{report_id}`
+
+## Dashboard
+
+* `GET /api/dashboard/advisor`
+* `GET /api/companies/{company_id}/dashboard`
+
+## Profiles
+
+* `GET /api/profile/me`
+* `PATCH /api/profile/me`
+
+All endpoints should return proper JSON responses and error messages.
+
+---
+
+# Required functionality for each button/action
+
+## 1. Save Client
+
+When frontend clicks **Save Client**:
+
+* validate request body
+* insert into `companies`
+* optionally create company_users mapping
+* return created company
+
+Fields:
+
+* company_name
+* tin_or_tax_id
+* industry
+* country
+* financial_year
+* assigned_advisor_id
+* created_by
+
+---
+
+## 2. Update Client
+
+When frontend clicks **Update Client**:
+
+* validate company exists
+* update allowed fields
+* return updated company
+
+---
+
+## 3. Upload Transactions CSV
+
+When frontend clicks **Upload Transactions**:
+
+* accept multipart file upload
+* validate required CSV columns
+* upload original file to Supabase Storage
+* insert row into `uploads`
+* parse CSV rows
+* normalize values
+* insert rows into `transactions`
+* update upload status and row_count
+* return summary with:
+
+  * upload_id
+  * company_id
+  * rows_imported
+  * rows_failed
+  * errors list if any
+
+Required CSV columns:
+
+* transaction_date
+* description
+* reference
+* amount
+* currency
+* account_code
+* account_category
+* vendor_name
+* customer_name
+* tax_type
+* vat_amount
+* withholding_tax_amount
+* transaction_type
+
+Support partial success.
+
+---
+
+## 4. Run Analysis
+
+When frontend clicks **Run Analysis**:
+
+* fetch company transactions
+* fetch active rules from `optional_rules_config`
+* run rule-based tax exposure analysis
+* optionally clear previously generated open flags
+* insert new rows into `tax_risk_flags`
+* calculate and return:
+
+  * total_flags
+  * estimated_exposure
+  * severity_breakdown
+  * risk_type_breakdown
+  * overall_risk_score
+  * overall_risk_level
+
+### Rules to implement
+
+#### VAT risk
+
+* taxable transaction with zero or missing VAT
+* suspicious VAT amount vs expected VAT rate
+* inconsistent VAT treatment
+
+#### Withholding tax risk
+
+* likely WHT category with missing WHT
+* suspicious WHT amount
+
+#### Expense risk
+
+* unusually large expenses
+* duplicate expenses
+* potentially non-deductible expense categories like entertainment, personal, unclassified
+
+#### Revenue risk
+
+* very large revenue transactions
+* missing tax classification
+
+All outputs must be labeled as:
+**risk indicators for advisor review**
+
+---
+
+## 5. Generate Report
+
+When frontend clicks **Generate Report**:
+
+* fetch company
+* fetch transactions
+* fetch risk flags
+* calculate summary
+* generate structured JSON report
+* insert into `reports`
+* return generated report
+
+Include:
+
+* company overview
+* reporting period
+* total transactions
+* total flags
+* estimated exposure
+* severity breakdown
+* risk type breakdown
+* top findings
+* recommendations
+
+Store report in `reports.summary_json`.
+
+---
+
+## 6. Dashboard Refresh
+
+Build dashboard endpoints that return summary data.
+
+### Advisor dashboard
+
+Return:
+
+* total companies
+* total transactions analysed
+* total open flags
+* total estimated exposure
+* high-risk companies
+* recent uploads
+* recent alerts
+
+### Company dashboard
+
+Return:
+
+* company info
+* total transactions analysed
+* total flags
+* estimated exposure
+* risk score
+* severity breakdown
+* risk type breakdown
+* monthly exposure trend
+* recent uploads
+* recent alerts
+
+---
+
+## 7. Mark Risk as Reviewed
+
+When frontend clicks **Mark as Reviewed**:
+
+* update `tax_risk_flags.status` to `reviewed`
+* return updated row
+
+---
+
+## 8. Mark Risk as Resolved
+
+When frontend clicks **Mark as Resolved**:
+
+* update `tax_risk_flags.status` to `resolved`
+* return updated row
+
+---
+
+## 9. Risks Filtering
+
+Support query params:
+
+* company_id
+* risk_type
+* severity
+* status
+* search
+* start_date
+* end_date
+* page
+* page_size
+
+Return paginated results.
+
+---
+
+## 10. Transactions Filtering
+
+Support query params:
+
+* company_id
+* upload_id
+* search
+* tax_type
+* transaction_type
+* min_amount
+* max_amount
+* start_date
+* end_date
+* page
+* page_size
+* sort_by
+* sort_order
+
+Return paginated results.
+
+---
+
+## 11. Profile Update
+
+When frontend clicks **Save Changes**:
+
+* update `profiles`
+* allow:
+
+  * full_name
+  * email if desired
+  * role only if admin flow exists
+* return updated profile
+
+---
+
+# Supabase integration requirements
+
+Create a reusable Supabase service.
+
+Use Supabase for:
+
+* CRUD operations
+* storage upload
+* querying data
+* writing reports and risk flags
+
+Use service role key for trusted backend operations where needed.
+
+Structure code so it is easy to replace or secure later.
+
+---
+
+# Pydantic schemas to create
+
+Create schemas for:
+
+* CompanyCreate
+* CompanyUpdate
+* ProfileUpdate
+* UploadResponse
+* TransactionRecord
+* RiskFlagCreate
+* RiskFlagResponse
+* ReportResponse
+* DashboardResponse
+* PaginatedResponse
+
+Use proper validation.
+
+---
+
+# CSV parser requirements
+
+Create `csv_parser.py` that:
+
+* validates required headers
+* parses date fields
+* parses numeric values safely
+* trims text fields
+* reports row-level errors
+* supports partial success
+* returns clean transaction dictionaries ready for insert
+
+Use pandas if helpful, but keep it simple and robust.
+
+---
+
+# Tax analysis service requirements
+
+Create `analysis_service.py` with clean Python functions such as:
+
+* `analyse_company_transactions(company_id)`
+* `analyse_vat_risks(transactions, rules)`
+* `analyse_wht_risks(transactions, rules)`
+* `analyse_expense_risks(transactions, rules)`
+* `analyse_revenue_risks(transactions, rules)`
+* `calculate_company_risk_score(flags)`
+
+Keep the logic readable and configurable.
+
+Estimated exposure can be a reasonable simplified calculation for MVP.
+
+---
+
+# Report service requirements
+
+Create `report_service.py` that:
+
+* builds a structured report summary JSON
+* stores it in Supabase
+* returns the created report record
+
+The JSON should include:
+
+* company_overview
+* reporting_period
+* total_transactions
+* total_flags
+* estimated_exposure
+* severity_breakdown
+* risk_type_breakdown
+* top_findings
+* recommendations
+* sample_flagged_transactions
+
+---
+
+# Access control
+
+Implement lightweight backend access checks:
+
+* admin can access all data
+* advisor can access assigned companies
+* client_user can access only linked company data
+
+Assume Supabase RLS also exists, but still structure code for permissions.
+
+A simple helper layer is enough for MVP.
+
+---
+
+# Response and error handling
+
+Add:
+
+* proper HTTP status codes
+* validation errors
+* try/except handling
+* readable error messages
+* logging
+* consistent JSON response structure where practical
+
+---
+
+# Requirements file
+
+Create `requirements.txt` with necessary packages, including:
+
+* fastapi
+* uvicorn
+* pydantic
+* python-dotenv
+* pandas
+* python-multipart
+* supabase
+
+Add any other small required packages if needed.
+
+---
+
+# README requirements
+
+Create a README with:
+
+* project overview
+* setup instructions
+* env setup
+* install instructions
+* how to run locally
+* API route summary
+* notes on Supabase connection
+
+---
+
+# Final instruction
+
+Do not just describe the backend.
+Actually generate the code files for the FastAPI backend, including:
+
+* main app
+* routes
+* services
+* schemas
+* CSV parser
+* tax analysis logic
+* report logic
+* Supabase integration
+* environment template
+* requirements.txt
+* README
+
+Make it practical, working, and ready to connect to my frontend and Supabase project.
+
+---
+
+## Shorter Replit version
+
+Build a **FastAPI Python backend** for my **Tax Exposure Intelligence Platform**. Use Supabase as DB/auth/storage, but Python handles all business logic. Create endpoints and code for companies CRUD, CSV upload, transaction import, tax analysis, risk flag creation, report generation, advisor/company dashboards, filtered transactions, filtered risks, profile update, and risk status updates. Use Pydantic, Pandas, modular services, and Supabase Python client. Generate real project files, not just an outline.
+
+---
+
+When Replit gives you the code, send it here and I’ll help you clean it up, fix errors, or connect it properly to your Supabase schema.

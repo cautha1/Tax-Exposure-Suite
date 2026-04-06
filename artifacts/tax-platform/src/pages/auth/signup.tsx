@@ -3,7 +3,7 @@ import { Link } from 'wouter';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { Building2, Mail, Lock, User, Briefcase, Loader2 } from 'lucide-react';
+import { Building2, Mail, Lock, User, Briefcase, Loader2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { motion } from 'framer-motion';
 
@@ -19,6 +19,7 @@ type SignupForm = z.infer<typeof signupSchema>;
 export default function Signup() {
   const { signup } = useAuth();
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<SignupForm>({
     resolver: zodResolver(signupSchema),
@@ -119,10 +120,19 @@ export default function Signup() {
                 </div>
                 <input 
                   {...register('password')}
-                  type="password" 
-                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                  type={showPassword ? 'text' : 'password'}
+                  className="w-full pl-10 pr-11 py-3 rounded-xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
                   placeholder="••••••••"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted-foreground hover:text-foreground transition-colors"
+                  tabIndex={-1}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
               </div>
               {errors.password && <p className="mt-1 text-sm text-destructive">{errors.password.message}</p>}
             </div>
