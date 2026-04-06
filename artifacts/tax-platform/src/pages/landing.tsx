@@ -244,7 +244,7 @@ export default function LandingPage() {
           desc="Our proprietary engine runs every transaction through a library of tax rules — VAT mismatches, withholding tax omissions, thin capitalisation breaches — and quantifies the monetary exposure for each."
           accent="#9B8EC4"
           reverse
-          points={['VAT, WHT, GST, CIT rules built in', 'Severity scoring for triage', 'Exposure estimated in dollars instantly']}
+          points={['VAT, WHT, PAYE, CIT rules built in', 'Severity scoring for triage', 'Exposure estimated in UGX instantly']}
         />
 
         <div className="h-px mx-auto max-w-xs" style={{ background: 'linear-gradient(90deg,transparent,#C8E6D4,transparent)' }} />
