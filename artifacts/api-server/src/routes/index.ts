@@ -7,6 +7,8 @@ import risksRouter from "./risks";
 import reportsRouter from "./reports";
 import dashboardRouter from "./dashboard";
 import uploadsRouter from "./uploads";
+import analysisRouter from "./analysis";
+import rulesRouter from "./rules";
 
 const router: IRouter = Router();
 
@@ -18,5 +20,7 @@ router.use(risksRouter);
 router.use(reportsRouter);
 router.use(dashboardRouter);
 router.use(uploadsRouter);
+router.use(analysisRouter);
+router.use(rulesRouter);
 
 export default router;

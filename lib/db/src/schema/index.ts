@@ -4,3 +4,5 @@ export * from "./uploads";
 export * from "./transactions";
 export * from "./taxRiskFlags";
 export * from "./reports";
+export * from "./companyUsers";
+export * from "./optionalRulesConfig";
