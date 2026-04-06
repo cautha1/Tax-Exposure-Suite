@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, optionalRulesConfigTable } from "../lib/db.js";
-import { eq, isNull, and, sql } from "drizzle-orm";
+import { supabase, toCamel, sbErr } from "../lib/supabase.js";
 
 const router: IRouter = Router();
 
@@ -19,20 +18,30 @@ export const DEFAULT_RULES = [
   { ruleCode: "REV-002", ruleName: "Revenue Without Tax Classification", category: "Revenue", description: "Revenue transactions missing tax type — verify 18% VAT liability.", enabled: true, threshold: null },
 ];
 
+interface RuleConfig {
+  id: string; companyId: string | null; ruleCode: string; ruleName: string;
+  category: string | null; enabled: boolean; threshold: number | string | null;
+  description: string | null; createdAt: string; updatedAt: string;
+}
+
 router.get("/rules", async (req, res) => {
   try {
     const { companyId } = req.query as Record<string, string>;
-    const rows = companyId
-      ? await db.select().from(optionalRulesConfigTable).where(
-          sql`(${optionalRulesConfigTable.companyId} = ${companyId} OR ${optionalRulesConfigTable.companyId} IS NULL)`
-        ).orderBy(optionalRulesConfigTable.ruleCode)
-      : await db.select().from(optionalRulesConfigTable).orderBy(optionalRulesConfigTable.ruleCode);
 
-    if (rows.length === 0) {
+    let q = supabase.from("optional_rules_config").select("*").order("rule_code");
+    if (companyId) q = q.or(`company_id.eq.${companyId},company_id.is.null`);
+
+    const { data, error } = await q;
+    sbErr(error, "list rules");
+
+    if (!data || data.length === 0) {
       res.json(DEFAULT_RULES.map(r => ({ ...r, id: null, companyId: companyId ?? null, createdAt: null })));
       return;
     }
-    res.json(rows.map(r => ({ ...r, threshold: r.threshold ? Number(r.threshold) : null })));
+    res.json((data).map((r: unknown) => {
+      const rule = toCamel<RuleConfig>(r);
+      return { ...rule, threshold: rule.threshold != null ? Number(rule.threshold) : null };
+    }));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
@@ -40,33 +49,37 @@ router.put("/rules/:ruleCode", async (req, res) => {
   try {
     const { ruleCode } = req.params;
     const { companyId, enabled, threshold } = req.body;
-    const existing = await db.select().from(optionalRulesConfigTable).where(
-      and(
-        eq(optionalRulesConfigTable.ruleCode, ruleCode),
-        companyId ? eq(optionalRulesConfigTable.companyId, companyId) : isNull(optionalRulesConfigTable.companyId),
-      )
-    ).limit(1);
+
+    let q = supabase.from("optional_rules_config").select("*").eq("rule_code", ruleCode);
+    if (companyId) q = q.eq("company_id", companyId);
+    else q = q.is("company_id", null);
+    const { data: existing } = await q.limit(1);
 
     const defaultRule = DEFAULT_RULES.find(r => r.ruleCode === ruleCode);
 
-    if (existing.length > 0) {
-      const [updated] = await db.update(optionalRulesConfigTable).set({
-        enabled: enabled ?? existing[0].enabled,
-        threshold: threshold != null ? String(threshold) : existing[0].threshold,
-        updatedAt: new Date(),
-      }).where(eq(optionalRulesConfigTable.id, existing[0].id)).returning();
-      res.json({ ...updated, threshold: updated.threshold ? Number(updated.threshold) : null });
+    if (existing && existing.length > 0) {
+      const curr = toCamel<RuleConfig>(existing[0]);
+      const { data, error } = await supabase.from("optional_rules_config").update({
+        enabled: enabled ?? curr.enabled,
+        threshold: threshold != null ? threshold : curr.threshold,
+        updated_at: new Date().toISOString(),
+      }).eq("id", curr.id).select().single();
+      sbErr(error, "update rule");
+      const updated = toCamel<RuleConfig>(data);
+      res.json({ ...updated, threshold: updated.threshold != null ? Number(updated.threshold) : null });
     } else {
-      const [created] = await db.insert(optionalRulesConfigTable).values({
-        ruleCode,
-        ruleName: defaultRule?.ruleName ?? ruleCode,
+      const { data, error } = await supabase.from("optional_rules_config").insert({
+        rule_code: ruleCode,
+        rule_name: defaultRule?.ruleName ?? ruleCode,
         category: defaultRule?.category ?? "General",
         description: defaultRule?.description ?? null,
-        companyId: companyId ?? null,
+        company_id: companyId ?? null,
         enabled: enabled ?? true,
-        threshold: threshold != null ? String(threshold) : (defaultRule?.threshold != null ? String(defaultRule.threshold) : null),
-      }).returning();
-      res.json({ ...created, threshold: created.threshold ? Number(created.threshold) : null });
+        threshold: threshold != null ? threshold : (defaultRule?.threshold ?? null),
+      }).select().single();
+      sbErr(error, "create rule");
+      const created = toCamel<RuleConfig>(data);
+      res.json({ ...created, threshold: created.threshold != null ? Number(created.threshold) : null });
     }
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });

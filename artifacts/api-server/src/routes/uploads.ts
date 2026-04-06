@@ -1,19 +1,25 @@
 import { Router, type IRouter } from "express";
-import { db, uploadsTable } from "../lib/db.js";
-import { eq, desc } from "drizzle-orm";
+import { supabase, toCamel, sbErr } from "../lib/supabase.js";
 
 const router: IRouter = Router();
 
 router.get("/uploads", async (req, res) => {
   try {
     const { companyId } = req.query as Record<string, string>;
-    const rows = companyId
-      ? await db.select().from(uploadsTable).where(eq(uploadsTable.companyId, companyId)).orderBy(desc(uploadsTable.createdAt))
-      : await db.select().from(uploadsTable).orderBy(desc(uploadsTable.createdAt));
-    res.json(rows.map(u => ({
-      id: u.id, companyId: u.companyId, fileName: u.fileName ?? null,
-      rowCount: u.rowCount ?? null, status: u.status ?? null, createdAt: u.createdAt,
-    })));
+    let q = supabase.from("uploads").select("*").order("created_at", { ascending: false });
+    if (companyId) q = q.eq("company_id", companyId);
+    const { data, error } = await q;
+    sbErr(error, "list uploads");
+    res.json((data ?? []).map((u: unknown) => {
+      const row = toCamel<{
+        id: string; companyId: string; fileName: string | null;
+        rowCount: number | null; status: string | null; createdAt: string;
+      }>(u);
+      return {
+        id: row.id, companyId: row.companyId, fileName: row.fileName ?? null,
+        rowCount: row.rowCount ?? null, status: row.status ?? null, createdAt: row.createdAt,
+      };
+    }));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 

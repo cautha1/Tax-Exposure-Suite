@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, taxRiskFlagsTable } from "../lib/db.js";
-import { eq } from "drizzle-orm";
+import { supabase, toCamel } from "../lib/supabase.js";
 
 const router: IRouter = Router();
 
@@ -132,8 +131,9 @@ router.post("/ai/explain-risk", async (req, res) => {
     const { riskId } = req.body;
     if (!riskId) { res.status(400).json({ error: "riskId is required" }); return; }
 
-    const [risk] = await db.select().from(taxRiskFlagsTable).where(eq(taxRiskFlagsTable.id, riskId)).limit(1);
-    if (!risk) { res.status(404).json({ error: "Risk not found" }); return; }
+    const { data: raw, error } = await supabase.from("tax_risk_flags").select("*").eq("id", riskId).single();
+    if (error || !raw) { res.status(404).json({ error: "Risk not found" }); return; }
+    const risk = toCamel<{ id: string; ruleCode: string | null; riskType: string | null; description: string | null; estimatedExposure: string | null }>(raw);
 
     const explanation = explainByRule(
       risk.ruleCode ?? "",

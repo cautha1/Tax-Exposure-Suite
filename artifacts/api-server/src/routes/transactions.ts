@@ -1,27 +1,34 @@
 import { Router, type IRouter } from "express";
-import { db, transactionsTable, uploadsTable, companiesTable, taxRiskFlagsTable } from "../lib/db.js";
-import { eq, ilike, and, gte, lte, or, count, asc, desc, sql, isNull } from "drizzle-orm";
+import { supabase, toCamel, sbErr } from "../lib/supabase.js";
 
 const router: IRouter = Router();
 
-const fmtTx = (t: typeof transactionsTable.$inferSelect) => ({
+interface Tx {
+  id: string; companyId: string; uploadId: string | null;
+  transactionDate: string | null; description: string | null; reference: string | null;
+  amount: string | number | null; currency: string | null; accountCode: string | null;
+  accountCategory: string | null; vendorName: string | null; customerName: string | null;
+  taxType: string | null; vatAmount: string | number | null; withholdingTaxAmount: string | number | null;
+  transactionType: string | null; createdAt: string;
+}
+
+const fmtTx = (t: Tx) => ({
   id: t.id, companyId: t.companyId, uploadId: t.uploadId ?? null,
   transactionDate: t.transactionDate ?? null, description: t.description ?? null,
-  reference: t.reference ?? null, amount: t.amount ? Number(t.amount) : null,
+  reference: t.reference ?? null, amount: t.amount != null ? Number(t.amount) : null,
   currency: t.currency ?? null, accountCode: t.accountCode ?? null,
   accountCategory: t.accountCategory ?? null, vendorName: t.vendorName ?? null,
   customerName: t.customerName ?? null, taxType: t.taxType ?? null,
-  vatAmount: t.vatAmount ? Number(t.vatAmount) : null,
-  withholdingTaxAmount: t.withholdingTaxAmount ? Number(t.withholdingTaxAmount) : null,
+  vatAmount: t.vatAmount != null ? Number(t.vatAmount) : null,
+  withholdingTaxAmount: t.withholdingTaxAmount != null ? Number(t.withholdingTaxAmount) : null,
   transactionType: t.transactionType ?? null, createdAt: t.createdAt,
 });
 
-const SORTABLE = new Set(["transaction_date", "amount", "description", "created_at"]);
-const colMap: Record<string, typeof transactionsTable[keyof typeof transactionsTable]> = {
-  transaction_date: transactionsTable.transactionDate,
-  amount: transactionsTable.amount,
-  description: transactionsTable.description,
-  created_at: transactionsTable.createdAt,
+const SORTABLE_COLS: Record<string, string> = {
+  transaction_date: "transaction_date",
+  amount: "amount",
+  description: "description",
+  created_at: "created_at",
 };
 
 router.get("/transactions", async (req, res) => {
@@ -36,47 +43,29 @@ router.get("/transactions", async (req, res) => {
     const pageNum = Math.max(1, parseInt(page));
     const limitNum = Math.min(200, parseInt(limit));
     const offset = (pageNum - 1) * limitNum;
+    const col = SORTABLE_COLS[sortBy] ?? "created_at";
+    const ascending = sortDir === "asc";
 
-    const conditions = [];
-    if (companyId) conditions.push(eq(transactionsTable.companyId, companyId));
-    if (uploadId) conditions.push(eq(transactionsTable.uploadId!, uploadId));
-    if (taxType === "NONE") {
-      conditions.push(isNull(transactionsTable.taxType));
-    } else if (taxType) {
-      conditions.push(eq(transactionsTable.taxType, taxType));
-    }
-    if (transactionType) conditions.push(eq(transactionsTable.transactionType, transactionType));
-    if (dateFrom) conditions.push(gte(transactionsTable.transactionDate, dateFrom));
-    if (dateTo) conditions.push(lte(transactionsTable.transactionDate, dateTo));
-    if (amountMin) conditions.push(gte(transactionsTable.amount, amountMin));
-    if (amountMax) conditions.push(lte(transactionsTable.amount, amountMax));
-    if (search) {
-      conditions.push(or(
-        ilike(transactionsTable.description, `%${search}%`),
-        ilike(transactionsTable.reference, `%${search}%`),
-        ilike(transactionsTable.vendorName, `%${search}%`),
-        ilike(transactionsTable.customerName, `%${search}%`),
-      ));
-    }
+    let q = supabase.from("transactions").select("*", { count: "exact" });
+    if (companyId) q = q.eq("company_id", companyId);
+    if (uploadId) q = q.eq("upload_id", uploadId);
+    if (taxType === "NONE") q = q.is("tax_type", null);
+    else if (taxType) q = q.eq("tax_type", taxType);
+    if (transactionType) q = q.eq("transaction_type", transactionType);
+    if (dateFrom) q = q.gte("transaction_date", dateFrom);
+    if (dateTo) q = q.lte("transaction_date", dateTo);
+    if (amountMin) q = q.gte("amount", amountMin);
+    if (amountMax) q = q.lte("amount", amountMax);
+    if (search) q = q.or(`description.ilike.%${search}%,reference.ilike.%${search}%,vendor_name.ilike.%${search}%,customer_name.ilike.%${search}%`);
 
-    const where = conditions.length ? and(...conditions) : undefined;
-    const [{ total }] = await db.select({ total: count() }).from(transactionsTable).where(where);
+    const { data, error, count } = await q.order(col, { ascending }).range(offset, offset + limitNum - 1);
+    sbErr(error, "list transactions");
 
-    const sortCol = SORTABLE.has(sortBy) ? colMap[sortBy] : transactionsTable.createdAt;
-    const orderFn = sortDir === "asc" ? asc : desc;
-    const rows = await db.select().from(transactionsTable).where(where)
-      .orderBy(orderFn(sortCol as any)).limit(limitNum).offset(offset);
-
-    res.json({ data: rows.map(fmtTx), total: Number(total), page: pageNum, limit: limitNum });
+    res.json({ data: (data ?? []).map((r: unknown) => fmtTx(toCamel<Tx>(r))), total: count ?? 0, page: pageNum, limit: limitNum });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
-const REQUIRED_COLS = ["transaction_date","description","amount","currency"];
-const ALL_COLS = [
-  "transaction_date","description","reference","amount","currency","account_code",
-  "account_category","vendor_name","customer_name","tax_type","vat_amount",
-  "withholding_tax_amount","transaction_type"
-];
+const REQUIRED_COLS = ["transaction_date", "description", "amount", "currency"];
 
 router.post("/transactions/upload", async (req, res) => {
   try {
@@ -85,7 +74,6 @@ router.post("/transactions/upload", async (req, res) => {
       res.status(400).json({ error: "companyId and transactions array required" });
       return;
     }
-
     if (transactions.length === 0) {
       res.status(400).json({ error: "No transactions provided" });
       return;
@@ -99,71 +87,78 @@ router.post("/transactions/upload", async (req, res) => {
     }
 
     const rowErrors: Array<{ row: number; errors: string[] }> = [];
-    const validRows: typeof transactions = [];
+    const validRows: Record<string, string>[] = [];
 
-    transactions.forEach((t: Record<string, string>, i: number) => {
+    (transactions as Record<string, string>[]).forEach((t, i) => {
       const errs: string[] = [];
       if (!t.transaction_date) errs.push("transaction_date is required");
       if (!t.amount || isNaN(Number(t.amount))) errs.push("amount must be a valid number");
       if (!t.currency) errs.push("currency is required");
-      if (errs.length > 0) { rowErrors.push({ row: i + 2, errors: errs }); }
-      else { validRows.push(t); }
+      if (errs.length > 0) rowErrors.push({ row: i + 2, errors: errs });
+      else validRows.push(t);
     });
 
-    const [upload] = await db.insert(uploadsTable).values({
-      companyId, fileName: fileName ?? "upload.csv",
-      rowCount: validRows.length, status: validRows.length > 0 ? "completed" : "failed",
-    }).returning();
+    const { data: uploadData, error: uploadErr } = await supabase.from("uploads").insert({
+      company_id: companyId, file_name: fileName ?? "upload.csv",
+      row_count: validRows.length, status: validRows.length > 0 ? "completed" : "failed",
+    }).select().single();
+    sbErr(uploadErr, "create upload");
+    const upload = toCamel<{ id: string }>(uploadData);
 
-    const newFlags: any[] = [];
+    const newFlags: Record<string, unknown>[] = [];
 
     if (validRows.length > 0) {
-      const rows = validRows.map((t: Record<string, string>) => ({
-        companyId, uploadId: upload.id,
-        transactionDate: t.transaction_date ?? null,
+      const rows = validRows.map(t => ({
+        company_id: companyId, upload_id: upload.id,
+        transaction_date: t.transaction_date ?? null,
         description: t.description ?? null,
         reference: t.reference ?? null,
         amount: t.amount ?? null,
-        currency: t.currency ?? "USD",
-        accountCode: t.account_code ?? null,
-        accountCategory: t.account_category ?? null,
-        vendorName: t.vendor_name ?? null,
-        customerName: t.customer_name ?? null,
-        taxType: t.tax_type ?? null,
-        vatAmount: t.vat_amount ?? null,
-        withholdingTaxAmount: t.withholding_tax_amount ?? null,
-        transactionType: t.transaction_type ?? null,
+        currency: t.currency ?? "UGX",
+        account_code: t.account_code ?? null,
+        account_category: t.account_category ?? null,
+        vendor_name: t.vendor_name ?? null,
+        customer_name: t.customer_name ?? null,
+        tax_type: t.tax_type ?? null,
+        vat_amount: t.vat_amount ?? null,
+        withholding_tax_amount: t.withholding_tax_amount ?? null,
+        transaction_type: t.transaction_type ?? null,
       }));
 
-      await db.insert(transactionsTable).values(rows);
+      const { error: txErr } = await supabase.from("transactions").insert(rows);
+      sbErr(txErr, "insert transactions");
 
       for (const t of rows) {
         const amt = Number(t.amount ?? 0);
-        const vat = Number(t.vatAmount ?? 0);
-        const wht = Number(t.withholdingTaxAmount ?? 0);
-        const cat = (t.accountCategory ?? "").toLowerCase();
-        const isService = ["services","professional","consulting","contractor","commission"].some(k => cat.includes(k));
+        const vat = Number(t.vat_amount ?? 0);
+        const wht = Number(t.withholding_tax_amount ?? 0);
+        const cat = (t.account_category ?? "").toLowerCase();
+        const isService = ["services", "professional", "consulting", "contractor", "commission"].some(k => cat.includes(k));
 
-        if (t.taxType === "VAT" && vat === 0 && amt > 0) {
-          newFlags.push({ companyId, ruleCode: "VAT-001", riskType: "VAT", description: `Zero VAT on taxable transaction (Uganda rate 18%): ${t.description ?? t.reference ?? "Unknown"}`, severity: "high", estimatedExposure: String(amt * 0.18), status: "open", category: "VAT" });
+        if (t.tax_type === "VAT" && vat === 0 && amt > 0) {
+          newFlags.push({ company_id: companyId, rule_code: "VAT-001", risk_type: "VAT", description: `Zero VAT on taxable transaction (Uganda rate 18%): ${t.description ?? t.reference ?? "Unknown"}`, severity: "high", estimated_exposure: amt * 0.18, status: "open", category: "VAT" });
         }
-        if (t.taxType === "WHT" && wht === 0 && amt > 0) {
-          newFlags.push({ companyId, ruleCode: "WHT-001", riskType: "Withholding Tax", description: `Missing WHT on WHT-type transaction (Uganda rate 15%): ${t.description ?? "Unknown"}`, severity: "high", estimatedExposure: String(amt * 0.15), status: "open", category: "Withholding Tax" });
+        if (t.tax_type === "WHT" && wht === 0 && amt > 0) {
+          newFlags.push({ company_id: companyId, rule_code: "WHT-001", risk_type: "Withholding Tax", description: `Missing WHT on WHT-type transaction (Uganda rate 15%): ${t.description ?? "Unknown"}`, severity: "high", estimated_exposure: amt * 0.15, status: "open", category: "Withholding Tax" });
         }
         if (isService && wht === 0 && amt > 500000) {
-          newFlags.push({ companyId, ruleCode: "WHT-002", riskType: "Withholding Tax", description: `Service payment with no WHT deducted (Uganda WHT 15%): ${t.vendorName ?? t.description ?? "Unknown"} (UGX ${amt.toLocaleString()})`, severity: "high", estimatedExposure: String(amt * 0.15), status: "open", category: "Withholding Tax" });
+          newFlags.push({ company_id: companyId, rule_code: "WHT-002", risk_type: "Withholding Tax", description: `Service payment with no WHT deducted (Uganda WHT 15%): ${t.vendor_name ?? t.description ?? "Unknown"} (UGX ${amt.toLocaleString()})`, severity: "high", estimated_exposure: amt * 0.15, status: "open", category: "Withholding Tax" });
         }
       }
 
-      if (newFlags.length > 0) await db.insert(taxRiskFlagsTable).values(newFlags);
+      if (newFlags.length > 0) {
+        const { error: flagErr } = await supabase.from("tax_risk_flags").insert(newFlags);
+        sbErr(flagErr, "insert flags");
+      }
 
-      const [co] = await db.select({ tc: companiesTable.transactionCount, ofc: companiesTable.openFlagsCount }).from(companiesTable).where(eq(companiesTable.id, companyId)).limit(1);
-      if (co) {
-        await db.update(companiesTable).set({
-          transactionCount: (co.tc ?? 0) + validRows.length,
-          openFlagsCount: (co.ofc ?? 0) + newFlags.length,
-          updatedAt: new Date(),
-        }).where(eq(companiesTable.id, companyId));
+      const { data: coRaw } = await supabase.from("companies").select("transaction_count, open_flags_count").eq("id", companyId).single();
+      if (coRaw) {
+        const co = toCamel<{ transactionCount: number; openFlagsCount: number }>(coRaw);
+        await supabase.from("companies").update({
+          transaction_count: (co.transactionCount ?? 0) + validRows.length,
+          open_flags_count: (co.openFlagsCount ?? 0) + newFlags.length,
+          updated_at: new Date().toISOString(),
+        }).eq("id", companyId);
       }
     }
 

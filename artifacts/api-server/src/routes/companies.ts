@@ -1,28 +1,42 @@
 import { Router, type IRouter } from "express";
-import { db, companiesTable, taxRiskFlagsTable, companyUsersTable, profilesTable } from "../lib/db.js";
-import { eq, ilike, and, count, sql } from "drizzle-orm";
+import { supabase, toCamel, sbErr } from "../lib/supabase.js";
 
 const router: IRouter = Router();
 
-const fmt = (c: typeof companiesTable.$inferSelect) => ({
+interface Company {
+  id: string;
+  companyName: string;
+  tinOrTaxId: string | null;
+  industry: string | null;
+  country: string | null;
+  financialYear: string | null;
+  riskLevel: string | null;
+  riskScore: string | number | null;
+  transactionCount: number | null;
+  openFlagsCount: number | null;
+  estimatedExposure: string | number | null;
+  createdAt: string;
+}
+
+const fmt = (c: Company) => ({
   id: c.id, companyName: c.companyName, tinOrTaxId: c.tinOrTaxId ?? null,
   industry: c.industry ?? null, country: c.country ?? null, financialYear: c.financialYear ?? null,
-  riskLevel: c.riskLevel ?? null, riskScore: c.riskScore ? Number(c.riskScore) : null,
+  riskLevel: c.riskLevel ?? null, riskScore: c.riskScore != null ? Number(c.riskScore) : null,
   transactionCount: c.transactionCount ?? null, openFlagsCount: c.openFlagsCount ?? null,
-  estimatedExposure: c.estimatedExposure ? Number(c.estimatedExposure) : null, createdAt: c.createdAt,
+  estimatedExposure: c.estimatedExposure != null ? Number(c.estimatedExposure) : null,
+  createdAt: c.createdAt,
 });
 
 router.get("/companies", async (req, res) => {
   try {
     const { search, industry, riskLevel } = req.query as Record<string, string>;
-    const conditions = [];
-    if (search) conditions.push(ilike(companiesTable.companyName, `%${search}%`));
-    if (industry) conditions.push(eq(companiesTable.industry, industry));
-    if (riskLevel) conditions.push(eq(companiesTable.riskLevel, riskLevel));
-    const rows = conditions.length
-      ? await db.select().from(companiesTable).where(and(...conditions)).orderBy(companiesTable.companyName)
-      : await db.select().from(companiesTable).orderBy(companiesTable.companyName);
-    res.json(rows.map(fmt));
+    let q = supabase.from("companies").select("*").order("company_name");
+    if (industry) q = q.eq("industry", industry);
+    if (riskLevel) q = q.eq("risk_level", riskLevel);
+    if (search) q = q.ilike("company_name", `%${search}%`);
+    const { data, error } = await q;
+    sbErr(error, "list companies");
+    res.json((data ?? []).map((r: unknown) => fmt(toCamel<Company>(r))));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
@@ -32,22 +46,23 @@ router.post("/companies", async (req, res) => {
     const { companyName, tinOrTaxId, industry, country, financialYear, assignedAdvisorId } = req.body;
     if (!companyName) { res.status(400).json({ error: "companyName is required" }); return; }
 
-    const [row] = await db.insert(companiesTable).values({
-      companyName, tinOrTaxId: tinOrTaxId || null, industry: industry || null,
-      country: country || null, financialYear: financialYear || null,
-      riskLevel: "low", riskScore: "0",
-    }).returning();
+    const { data, error } = await supabase.from("companies").insert({
+      company_name: companyName, tin_or_tax_id: tinOrTaxId || null, industry: industry || null,
+      country: country || null, financial_year: financialYear || null,
+      risk_level: "low", risk_score: 0,
+    }).select().single();
+    sbErr(error, "insert company");
+    const row = toCamel<Company>(data);
 
     if (assignedAdvisorId) {
-      await db.insert(companyUsersTable).values({
-        companyId: row.id, userId: assignedAdvisorId, role: "advisor", assignedBy: userId ?? null,
-      }).onConflictDoNothing();
+      await supabase.from("company_users").insert({
+        company_id: row.id, user_id: assignedAdvisorId, role: "advisor", assigned_by: userId ?? null,
+      });
     }
-
     if (userId && userId !== assignedAdvisorId) {
-      await db.insert(companyUsersTable).values({
-        companyId: row.id, userId, role: "owner", assignedBy: userId,
-      }).onConflictDoNothing();
+      await supabase.from("company_users").insert({
+        company_id: row.id, user_id: userId, role: "owner", assigned_by: userId,
+      });
     }
 
     res.status(201).json(fmt(row));
@@ -56,9 +71,9 @@ router.post("/companies", async (req, res) => {
 
 router.get("/companies/:id", async (req, res) => {
   try {
-    const [row] = await db.select().from(companiesTable).where(eq(companiesTable.id, req.params.id)).limit(1);
-    if (!row) { res.status(404).json({ error: "Not found" }); return; }
-    res.json(fmt(row));
+    const { data, error } = await supabase.from("companies").select("*").eq("id", req.params.id).single();
+    if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    res.json(fmt(toCamel<Company>(data)));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
@@ -67,20 +82,21 @@ router.put("/companies/:id", async (req, res) => {
     const { companyName, tinOrTaxId, industry, country, financialYear, assignedAdvisorId } = req.body;
     const userId = req.headers["x-user-id"] as string;
 
-    const updateData: Record<string, unknown> = { updatedAt: new Date() };
-    if (companyName !== undefined) updateData.companyName = companyName;
-    if (tinOrTaxId !== undefined) updateData.tinOrTaxId = tinOrTaxId;
-    if (industry !== undefined) updateData.industry = industry;
-    if (country !== undefined) updateData.country = country;
-    if (financialYear !== undefined) updateData.financialYear = financialYear;
+    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (companyName !== undefined) updates.company_name = companyName;
+    if (tinOrTaxId !== undefined) updates.tin_or_tax_id = tinOrTaxId;
+    if (industry !== undefined) updates.industry = industry;
+    if (country !== undefined) updates.country = country;
+    if (financialYear !== undefined) updates.financial_year = financialYear;
 
-    const [row] = await db.update(companiesTable).set(updateData).where(eq(companiesTable.id, req.params.id)).returning();
-    if (!row) { res.status(404).json({ error: "Not found" }); return; }
+    const { data, error } = await supabase.from("companies").update(updates).eq("id", req.params.id).select().single();
+    if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    const row = toCamel<Company>(data);
 
     if (assignedAdvisorId) {
-      await db.insert(companyUsersTable).values({
-        companyId: row.id, userId: assignedAdvisorId, role: "advisor", assignedBy: userId ?? null,
-      }).onConflictDoNothing();
+      await supabase.from("company_users").upsert({
+        company_id: row.id, user_id: assignedAdvisorId, role: "advisor", assigned_by: userId ?? null,
+      }, { onConflict: "company_id,user_id" });
     }
 
     res.json(fmt(row));
@@ -89,12 +105,19 @@ router.put("/companies/:id", async (req, res) => {
 
 router.get("/companies/:id/users", async (req, res) => {
   try {
-    const assignments = await db.select().from(companyUsersTable).where(eq(companyUsersTable.companyId, req.params.id));
-    const userIds = assignments.map(a => a.userId);
+    const { data: assignments, error } = await supabase.from("company_users").select("*").eq("company_id", req.params.id);
+    sbErr(error, "list company users");
+    const userIds = (assignments ?? []).map((a: Record<string, unknown>) => a.user_id);
     if (userIds.length === 0) { res.json([]); return; }
-    const profiles = await db.select({ id: profilesTable.id, email: profilesTable.email, fullName: profilesTable.fullName, role: profilesTable.role }).from(profilesTable);
-    const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
-    res.json(assignments.map(a => ({ ...a, user: profileMap[a.userId] ?? null })));
+
+    const { data: profiles } = await supabase.from("profiles").select("id, email, full_name, role").in("id", userIds);
+    const profileMap: Record<string, unknown> = Object.fromEntries(
+      (profiles ?? []).map((p: Record<string, unknown>) => [p.id, toCamel(p)])
+    );
+
+    res.json((assignments ?? []).map((a: Record<string, unknown>) => ({
+      ...toCamel(a), user: profileMap[a.user_id as string] ?? null,
+    })));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
@@ -103,22 +126,29 @@ router.post("/companies/:id/users", async (req, res) => {
     const userId = req.headers["x-user-id"] as string;
     const { userId: targetUserId, role = "member" } = req.body;
     if (!targetUserId) { res.status(400).json({ error: "userId required" }); return; }
-    const [row] = await db.insert(companyUsersTable).values({
-      companyId: req.params.id, userId: targetUserId, role, assignedBy: userId ?? null,
-    }).onConflictDoNothing().returning();
-    res.status(201).json(row ?? { message: "User already assigned" });
+    const { data, error } = await supabase.from("company_users").upsert({
+      company_id: req.params.id, user_id: targetUserId, role, assigned_by: userId ?? null,
+    }, { onConflict: "company_id,user_id" }).select().single();
+    if (error) { res.status(201).json({ message: "User already assigned" }); return; }
+    res.status(201).json(toCamel(data));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 router.get("/companies/:id/summary", async (req, res) => {
   try {
     const { id } = req.params;
-    const [company] = await db.select().from(companiesTable).where(eq(companiesTable.id, id)).limit(1);
-    if (!company) { res.status(404).json({ error: "Not found" }); return; }
-    const risks = await db.select().from(taxRiskFlagsTable).where(eq(taxRiskFlagsTable.companyId, id));
+    const { data: companyRaw, error } = await supabase.from("companies").select("*").eq("id", id).single();
+    if (error || !companyRaw) { res.status(404).json({ error: "Not found" }); return; }
+    const company = toCamel<Company>(companyRaw);
+
+    const { data: risksRaw } = await supabase.from("tax_risk_flags").select("status, severity, category, estimated_exposure").eq("company_id", id);
+    const risks = (risksRaw ?? []).map((r: unknown) => toCamel<{
+      status: string; severity: string; category: string; estimatedExposure: string | number;
+    }>(r));
+
     const openRisks = risks.filter(r => r.status === "open");
     const estimatedExposure = openRisks.reduce((s, r) => s + Number(r.estimatedExposure ?? 0), 0);
-    const riskScore = company.riskScore ? Number(company.riskScore) : 0;
+    const riskScore = company.riskScore != null ? Number(company.riskScore) : 0;
     const catMap: Record<string, { count: number; exposure: number }> = {};
     const sevMap: Record<string, number> = {};
     for (const r of risks) {

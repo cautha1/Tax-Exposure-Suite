@@ -12,7 +12,7 @@ A premium B2B SaaS platform for tax advisory firms, audit firms, and finance tea
 - **TypeScript version**: 5.9
 - **Frontend**: React + Vite, Tailwind CSS, shadcn/ui, Recharts, Framer Motion
 - **API framework**: Express 5
-- **Database**: PostgreSQL + Drizzle ORM
+- **Database**: Supabase (PostgreSQL via REST API over HTTPS using `@supabase/supabase-js`)
 - **Validation**: Zod (`zod/v4`), `drizzle-zod`
 - **API codegen**: Orval (from OpenAPI spec)
 - **Auth**: Email/password with bcryptjs, session stored in localStorage

@@ -1,33 +1,27 @@
 import { Router, type IRouter } from "express";
-import { db, taxRiskFlagsTable, companiesTable, transactionsTable } from "../lib/db.js";
-import { eq, and, gte, lte, ilike, or, count } from "drizzle-orm";
+import { supabase, toCamel, sbErr } from "../lib/supabase.js";
 
 const router: IRouter = Router();
 
-type RiskRow = typeof taxRiskFlagsTable.$inferSelect;
+interface RiskFlag {
+  id: string; companyId: string; transactionId: string | null; ruleCode: string | null;
+  riskType: string | null; description: string | null; severity: string | null;
+  estimatedExposure: string | number | null; status: string | null; category: string | null;
+  confidence: string | null; riskScore: string | number | null;
+  reviewedAt: string | null; reviewedBy: string | null; reviewNotes: string | null;
+  resolvedBy: string | null; resolvedAt: string | null; internalNote: string | null;
+  createdAt: string;
+}
 
-const fmtRisk = (r: RiskRow, companyName?: string, transaction?: Record<string, unknown>) => ({
-  id: r.id,
-  companyId: r.companyId,
-  transactionId: r.transactionId ?? null,
-  ruleCode: r.ruleCode ?? null,
-  riskType: r.riskType ?? null,
-  description: r.description ?? null,
-  severity: r.severity ?? null,
-  estimatedExposure: r.estimatedExposure != null ? Number(r.estimatedExposure) : null,
-  status: r.status ?? null,
-  category: r.category ?? null,
-  confidence: r.confidence ?? null,
+const fmtRisk = (r: RiskFlag, companyName?: string, transaction?: Record<string, unknown>) => ({
+  id: r.id, companyId: r.companyId, transactionId: r.transactionId ?? null,
+  ruleCode: r.ruleCode ?? null, riskType: r.riskType ?? null, description: r.description ?? null,
+  severity: r.severity ?? null, estimatedExposure: r.estimatedExposure != null ? Number(r.estimatedExposure) : null,
+  status: r.status ?? null, category: r.category ?? null, confidence: r.confidence ?? null,
   riskScore: r.riskScore != null ? Number(r.riskScore) : null,
-  reviewedAt: r.reviewedAt ?? null,
-  reviewedBy: r.reviewedBy ?? null,
-  reviewNotes: r.reviewNotes ?? null,
-  resolvedBy: r.resolvedBy ?? null,
-  resolvedAt: r.resolvedAt ?? null,
-  internalNote: r.internalNote ?? null,
-  companyName: companyName ?? null,
-  transaction: transaction ?? null,
-  createdAt: r.createdAt,
+  reviewedAt: r.reviewedAt ?? null, reviewedBy: r.reviewedBy ?? null, reviewNotes: r.reviewNotes ?? null,
+  resolvedBy: r.resolvedBy ?? null, resolvedAt: r.resolvedAt ?? null, internalNote: r.internalNote ?? null,
+  companyName: companyName ?? null, transaction: transaction ?? null, createdAt: r.createdAt,
 });
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -39,23 +33,18 @@ router.get("/risks/summary", async (req, res) => {
       res.json({ openCount: 0, reviewedCount: 0, resolvedCount: 0, totalExposure: 0 });
       return;
     }
-    const conditions = [];
-    if (companyId) conditions.push(eq(taxRiskFlagsTable.companyId, companyId));
-    const where = conditions.length ? and(...conditions) : undefined;
-
-    const rows = await db.select({
-      status: taxRiskFlagsTable.status,
-      exposure: taxRiskFlagsTable.estimatedExposure,
-    }).from(taxRiskFlagsTable).where(where);
+    let q = supabase.from("tax_risk_flags").select("status, estimated_exposure");
+    if (companyId) q = q.eq("company_id", companyId);
+    const { data, error } = await q;
+    sbErr(error, "risk summary");
 
     let openCount = 0, reviewedCount = 0, resolvedCount = 0, totalExposure = 0;
-    for (const r of rows) {
-      totalExposure += Number(r.exposure ?? 0);
+    for (const r of (data ?? []) as Record<string, unknown>[]) {
+      totalExposure += Number(r.estimated_exposure ?? 0);
       if (r.status === "open") openCount++;
       else if (r.status === "reviewed") reviewedCount++;
       else if (r.status === "resolved") resolvedCount++;
     }
-
     res.json({ openCount, reviewedCount, resolvedCount, totalExposure });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
@@ -70,65 +59,56 @@ router.get("/risks", async (req, res) => {
     const limitNum = Math.min(200, parseInt(limit));
     const offset = (pageNum - 1) * limitNum;
 
-    const conditions = [];
-    if (companyId) conditions.push(eq(taxRiskFlagsTable.companyId, companyId));
-    if (severity) conditions.push(eq(taxRiskFlagsTable.severity, severity));
-    if (status) conditions.push(eq(taxRiskFlagsTable.status, status));
-    if (riskType) conditions.push(eq(taxRiskFlagsTable.riskType, riskType));
-    if (category) conditions.push(eq(taxRiskFlagsTable.category, category));
-    if (search) {
-      conditions.push(or(
-        ilike(taxRiskFlagsTable.description, `%${search}%`),
-        ilike(taxRiskFlagsTable.ruleCode, `%${search}%`),
-      ));
-    }
-    if (dateFrom) conditions.push(gte(taxRiskFlagsTable.createdAt, new Date(dateFrom)));
-    if (dateTo) conditions.push(lte(taxRiskFlagsTable.createdAt, new Date(dateTo)));
+    let q = supabase.from("tax_risk_flags").select("*", { count: "exact" });
+    if (companyId) q = q.eq("company_id", companyId);
+    if (severity) q = q.eq("severity", severity);
+    if (status) q = q.eq("status", status);
+    if (riskType) q = q.eq("risk_type", riskType);
+    if (category) q = q.eq("category", category);
+    if (search) q = q.or(`description.ilike.%${search}%,rule_code.ilike.%${search}%`);
+    if (dateFrom) q = q.gte("created_at", new Date(dateFrom).toISOString());
+    if (dateTo) q = q.lte("created_at", new Date(dateTo).toISOString());
 
-    const where = conditions.length ? and(...conditions) : undefined;
-    const [{ total }] = await db.select({ total: count() }).from(taxRiskFlagsTable).where(where);
-    const rows = await db.select().from(taxRiskFlagsTable).where(where)
-      .orderBy(taxRiskFlagsTable.createdAt).limit(limitNum).offset(offset);
+    const { data, error, count } = await q.order("created_at", { ascending: false }).range(offset, offset + limitNum - 1);
+    sbErr(error, "list risks");
 
-    const companies = await db.select({ id: companiesTable.id, name: companiesTable.companyName }).from(companiesTable);
-    const companyMap = Object.fromEntries(companies.map(c => [c.id, c.name]));
+    const { data: companiesRaw } = await supabase.from("companies").select("id, company_name");
+    const companyMap: Record<string, string> = Object.fromEntries(
+      (companiesRaw ?? []).map((c: Record<string, unknown>) => [c.id, c.company_name])
+    );
 
-    res.json({ data: rows.map(r => fmtRisk(r, companyMap[r.companyId])), total: Number(total), page: pageNum, limit: limitNum });
+    res.json({
+      data: (data ?? []).map((r: unknown) => {
+        const flag = toCamel<RiskFlag>(r);
+        return fmtRisk(flag, companyMap[flag.companyId]);
+      }),
+      total: count ?? 0, page: pageNum, limit: limitNum,
+    });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 router.get("/risks/:id", async (req, res) => {
   try {
-    const [risk] = await db.select().from(taxRiskFlagsTable).where(eq(taxRiskFlagsTable.id, req.params.id)).limit(1);
-    if (!risk) { res.status(404).json({ error: "Not found" }); return; }
+    const { data: raw, error } = await supabase.from("tax_risk_flags").select("*").eq("id", req.params.id).single();
+    if (error || !raw) { res.status(404).json({ error: "Not found" }); return; }
+    const risk = toCamel<RiskFlag>(raw);
 
-    const [companyRow] = await db.select({
-      id: companiesTable.id,
-      companyName: companiesTable.companyName,
-      industry: companiesTable.industry,
-      country: companiesTable.country,
-      riskLevel: companiesTable.riskLevel,
-      riskScore: companiesTable.riskScore,
-    }).from(companiesTable).where(eq(companiesTable.id, risk.companyId)).limit(1);
+    const { data: coRaw } = await supabase.from("companies").select("id, company_name, industry, country, risk_level, risk_score").eq("id", risk.companyId).single();
+    const company = coRaw ? toCamel<{ id: string; companyName: string; industry: string | null; country: string | null; riskLevel: string | null; riskScore: string | null }>(coRaw) : null;
 
     let transaction: Record<string, unknown> | undefined;
     if (risk.transactionId) {
-      const [tx] = await db.select().from(transactionsTable).where(eq(transactionsTable.id, risk.transactionId)).limit(1);
-      if (tx) transaction = tx as unknown as Record<string, unknown>;
+      const { data: txRaw } = await supabase.from("transactions").select("*").eq("id", risk.transactionId).single();
+      if (txRaw) transaction = toCamel(txRaw) as Record<string, unknown>;
     }
 
-    const company = companyRow
-      ? {
-          id: companyRow.id,
-          companyName: companyRow.companyName,
-          industry: companyRow.industry ?? null,
-          country: companyRow.country ?? null,
-          riskLevel: companyRow.riskLevel ?? null,
-          riskScore: companyRow.riskScore != null ? Number(companyRow.riskScore) : null,
-        }
-      : null;
+    const companyFmt = company ? {
+      id: company.id, companyName: company.companyName, industry: company.industry ?? null,
+      country: company.country ?? null, riskLevel: company.riskLevel ?? null,
+      riskScore: company.riskScore != null ? Number(company.riskScore) : null,
+    } : null;
 
-    res.json({ ...fmtRisk(risk, companyRow?.companyName, transaction), company });
+    res.json({ ...fmtRisk(risk, company?.companyName, transaction), company: companyFmt });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
@@ -136,15 +116,13 @@ router.post("/risks/:id/review", async (req, res) => {
   try {
     const userId = req.headers["x-user-id"] as string | undefined;
     const { reviewNotes } = req.body;
-    const [risk] = await db.update(taxRiskFlagsTable).set({
-      status: "reviewed",
-      reviewedAt: new Date(),
-      reviewedBy: userId ?? null,
-      reviewNotes: reviewNotes ?? null,
-      updatedAt: new Date(),
-    }).where(eq(taxRiskFlagsTable.id, req.params.id)).returning();
-    if (!risk) { res.status(404).json({ error: "Not found" }); return; }
-    res.json({ success: true, risk: fmtRisk(risk) });
+    const { data, error } = await supabase.from("tax_risk_flags").update({
+      status: "reviewed", reviewed_at: new Date().toISOString(),
+      reviewed_by: userId ?? null, review_notes: reviewNotes ?? null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", req.params.id).select().single();
+    if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    res.json({ success: true, risk: fmtRisk(toCamel<RiskFlag>(data)) });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
@@ -152,18 +130,21 @@ router.post("/risks/:id/resolve", async (req, res) => {
   try {
     const userId = req.headers["x-user-id"] as string | undefined;
     const { reviewNotes } = req.body;
-    const [risk] = await db.update(taxRiskFlagsTable).set({
-      status: "resolved",
-      resolvedAt: new Date(),
-      resolvedBy: userId ?? null,
-      reviewNotes: reviewNotes ?? null,
-      updatedAt: new Date(),
-    }).where(eq(taxRiskFlagsTable.id, req.params.id)).returning();
-    if (!risk) { res.status(404).json({ error: "Not found" }); return; }
+    const { data, error } = await supabase.from("tax_risk_flags").update({
+      status: "resolved", resolved_at: new Date().toISOString(),
+      resolved_by: userId ?? null, review_notes: reviewNotes ?? null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", req.params.id).select().single();
+    if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    const risk = toCamel<RiskFlag>(data);
 
-    const [co] = await db.select({ ofc: companiesTable.openFlagsCount }).from(companiesTable).where(eq(companiesTable.id, risk.companyId)).limit(1);
-    if (co) {
-      await db.update(companiesTable).set({ openFlagsCount: Math.max((co.ofc ?? 1) - 1, 0), updatedAt: new Date() }).where(eq(companiesTable.id, risk.companyId));
+    const { data: coRaw } = await supabase.from("companies").select("open_flags_count").eq("id", risk.companyId).single();
+    if (coRaw) {
+      const co = toCamel<{ openFlagsCount: number }>(coRaw);
+      await supabase.from("companies").update({
+        open_flags_count: Math.max((co.openFlagsCount ?? 1) - 1, 0),
+        updated_at: new Date().toISOString(),
+      }).eq("id", risk.companyId);
     }
     res.json({ success: true, risk: fmtRisk(risk) });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
@@ -173,12 +154,11 @@ router.patch("/risks/:id/note", async (req, res) => {
   try {
     const { note } = req.body;
     if (typeof note !== "string") { res.status(400).json({ error: "note (string) is required" }); return; }
-    const [risk] = await db.update(taxRiskFlagsTable).set({
-      internalNote: note,
-      updatedAt: new Date(),
-    }).where(eq(taxRiskFlagsTable.id, req.params.id)).returning();
-    if (!risk) { res.status(404).json({ error: "Not found" }); return; }
-    res.json({ success: true, risk: fmtRisk(risk) });
+    const { data, error } = await supabase.from("tax_risk_flags").update({
+      internal_note: note, updated_at: new Date().toISOString(),
+    }).eq("id", req.params.id).select().single();
+    if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    res.json({ success: true, risk: fmtRisk(toCamel<RiskFlag>(data)) });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
