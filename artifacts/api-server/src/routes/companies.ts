@@ -107,13 +107,22 @@ router.get("/companies/:id/users", async (req, res) => {
   try {
     const { data: assignments, error } = await supabase.from("company_users").select("*").eq("company_id", req.params.id);
     sbErr(error, "list company users");
-    const userIds = (assignments ?? []).map((a: Record<string, unknown>) => a.user_id);
+    const userIds = (assignments ?? []).map((a: Record<string, unknown>) => a.user_id as string);
     if (userIds.length === 0) { res.json([]); return; }
 
-    const { data: profiles } = await supabase.from("profiles").select("id, email, full_name, role").in("id", userIds);
-    const profileMap: Record<string, unknown> = Object.fromEntries(
-      (profiles ?? []).map((p: Record<string, unknown>) => [p.id, toCamel(p)])
-    );
+    // Look up users from Supabase Auth (no profiles table dependency)
+    const profileMap: Record<string, { id: string; email: string | null; fullName: string | null; role: string }> = {};
+    for (const uid of userIds) {
+      const { data: { user } } = await supabase.auth.admin.getUserById(uid);
+      if (user) {
+        profileMap[uid] = {
+          id: user.id,
+          email: user.email ?? null,
+          fullName: user.user_metadata?.full_name ?? null,
+          role: user.user_metadata?.role ?? "advisor",
+        };
+      }
+    }
 
     res.json((assignments ?? []).map((a: Record<string, unknown>) => ({
       ...toCamel(a), user: profileMap[a.user_id as string] ?? null,
