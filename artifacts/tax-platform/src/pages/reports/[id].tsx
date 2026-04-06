@@ -1,12 +1,20 @@
 import React, { useState, useEffect } from 'react';
+import {
+  ArrowLeft, Building2, FileText, CheckCircle2, TrendingUp,
+  ChevronRight, Hash, MapPin, Calendar, Loader2
+} from 'lucide-react';
 import { useRoute, Link } from 'wouter';
 import { AppLayout } from '@/components/layout';
-import { useGetReport, useGetCompany } from '@workspace/api-client-react';
+import { useGetReport, useGetCompany, type Report } from '@workspace/api-client-react';
 import { api } from '@/lib/api';
-import {
-  ArrowLeft, Building2, FileText, AlertTriangle, CheckCircle2, TrendingUp,
-  ShieldAlert, ChevronRight, Hash, MapPin, Calendar, Loader2
-} from 'lucide-react';
+
+interface ReportExtended extends Report {
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  transactionCount?: number | null;
+}
+
+const ALL_CATEGORIES = ['VAT', 'Withholding Tax', 'PAYE', 'Expense', 'Revenue'] as const;
 
 const RISK_TYPE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
   'VAT':             { bg: 'bg-violet-50', text: 'text-violet-700', border: 'border-violet-200' },
@@ -45,7 +53,9 @@ export default function ReportDetail() {
   const [, params] = useRoute('/reports/:id');
   const id = params?.id ?? '';
 
-  const { data: report, isLoading: reportLoading } = useGetReport(id);
+  const { data: rawReport, isLoading: reportLoading } = useGetReport(id);
+  const report = rawReport as ReportExtended | undefined;
+
   const { data: company, isLoading: companyLoading } = useGetCompany(report?.companyId ?? '', {
     query: { enabled: !!report?.companyId },
   });
@@ -83,7 +93,7 @@ export default function ReportDetail() {
   }
 
   const formatCurrency = (v?: number | null) =>
-    v != null ? `UGX ${new Intl.NumberFormat('en-UG').format(v)}` : '-';
+    v != null ? `UGX ${new Intl.NumberFormat('en-UG').format(v)}` : 'UGX 0';
 
   const openRisks = risks.filter(r => r.status === 'open');
   const highRisks = openRisks.filter(r => r.severity === 'high');
@@ -92,6 +102,9 @@ export default function ReportDetail() {
   const totalSev = openRisks.length || 1;
 
   const catMap: Record<string, { count: number; exposure: number }> = {};
+  for (const cat of ALL_CATEGORIES) {
+    catMap[cat] = { count: 0, exposure: 0 };
+  }
   for (const r of risks) {
     const cat = r.category ?? 'Other';
     if (!catMap[cat]) catMap[cat] = { count: 0, exposure: 0 };
@@ -99,11 +112,11 @@ export default function ReportDetail() {
     catMap[cat].exposure += r.estimatedExposure ?? 0;
   }
 
-  const topFindings = openRisks
+  const topFindings = [...openRisks]
     .sort((a, b) => (b.estimatedExposure ?? 0) - (a.estimatedExposure ?? 0))
     .slice(0, 5);
 
-  const presentCategories = Object.keys(catMap);
+  const presentCategories = ALL_CATEGORIES.filter(cat => catMap[cat].count > 0);
   const recommendations = presentCategories.map(cat => RECOMMENDATIONS[cat]).filter(Boolean);
   const genericRecs = [
     'Ensure all tax returns (VAT, WHT, PAYE, Corporate Tax) are filed on time with Uganda Revenue Authority (URA).',
@@ -111,12 +124,19 @@ export default function ReportDetail() {
     'Consider a full pre-audit health check before the next URA audit cycle.',
   ];
 
-  const riskScore = report.totalExposure != null
-    ? Math.min(100, Math.round(((report.highRisks ?? 0) * 10 + (report.mediumRisks ?? 0) * 5 + (report.lowRisks ?? 0)) / Math.max(1, (report.highRisks ?? 0) + (report.mediumRisks ?? 0) + (report.lowRisks ?? 0)) * 10))
-    : 0;
+  const riskScore = Math.min(100, Math.round(
+    (highRisks.length * 10 + medRisks.length * 5 + lowRisks.length) / Math.max(risks.length, 1) * 10
+  ));
+  const riskLevel: 'high' | 'medium' | 'low' = highRisks.length > 3 ? 'high' : medRisks.length > 5 ? 'medium' : 'low';
+  const riskLevelColors: Record<'high' | 'medium' | 'low', string> = {
+    high: 'text-rose-600 bg-rose-50 border-rose-200',
+    medium: 'text-amber-600 bg-amber-50 border-amber-200',
+    low: 'text-emerald-600 bg-emerald-50 border-emerald-200',
+  };
 
-  const riskLevel = (report.highRisks ?? 0) > 3 ? 'high' : (report.mediumRisks ?? 0) > 5 ? 'medium' : 'low';
-  const riskLevelColors = { high: 'text-rose-600 bg-rose-50 border-rose-200', medium: 'text-amber-600 bg-amber-50 border-amber-200', low: 'text-emerald-600 bg-emerald-50 border-emerald-200' };
+  const periodText = report.periodStart && report.periodEnd
+    ? `${new Date(report.periodStart).toLocaleDateString('en-UG', { month: 'short', year: 'numeric' })} – ${new Date(report.periodEnd).toLocaleDateString('en-UG', { month: 'short', year: 'numeric' })}`
+    : report.createdAt ? String(new Date(report.createdAt).getFullYear()) : '-';
 
   return (
     <AppLayout>
@@ -145,7 +165,7 @@ export default function ReportDetail() {
         </div>
 
         <p className="text-xs text-muted-foreground mb-8">
-          Generated {report.createdAt ? new Date(report.createdAt).toLocaleDateString('en-UG', { dateStyle: 'long' }) : '-'} · Uganda Revenue Authority (URA) Jurisdiction · VAT 18% · WHT 15% · PAYE 30%
+          Generated {report.createdAt ? new Date(report.createdAt).toLocaleDateString('en-UG', { dateStyle: 'long' }) : '-'} · Uganda Revenue Authority (URA) · VAT 18% · WHT 15% · PAYE 30%
         </p>
 
         <div className="space-y-6">
@@ -174,11 +194,7 @@ export default function ReportDetail() {
               </div>
               <div>
                 <p className="text-xs text-muted-foreground font-medium mb-1 flex items-center gap-1"><Calendar className="w-3 h-3" /> Period</p>
-                <p className="text-sm font-semibold text-foreground">
-                  {(report as any).periodStart && (report as any).periodEnd
-                    ? `${new Date((report as any).periodStart).toLocaleDateString('en-UG', { month: 'short', year: 'numeric' })} – ${new Date((report as any).periodEnd).toLocaleDateString('en-UG', { month: 'short', year: 'numeric' })}`
-                    : report.createdAt ? String(new Date(report.createdAt).getFullYear()) : '-'}
-                </p>
+                <p className="text-sm font-semibold text-foreground">{periodText}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground font-medium mb-1">Jurisdiction</p>
@@ -196,7 +212,7 @@ export default function ReportDetail() {
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
               <div className="bg-muted/40 rounded-xl p-4">
                 <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider mb-1">Transactions</p>
-                <p className="text-3xl font-bold text-foreground">{(report as any).transactionCount ?? '–'}</p>
+                <p className="text-3xl font-bold text-foreground">{report.transactionCount ?? '–'}</p>
                 <p className="text-xs text-muted-foreground">analysed</p>
               </div>
               <div className="bg-muted/40 rounded-xl p-4">
@@ -219,7 +235,7 @@ export default function ReportDetail() {
                 <p className="text-3xl font-bold text-rose-600">{report.highRisks ?? 0}</p>
               </div>
               <div className="bg-muted/40 rounded-xl p-4">
-                <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider mb-1">Medium / Low</p>
+                <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider mb-1">Med / Low</p>
                 <p className="text-2xl font-bold text-amber-600">{report.mediumRisks ?? 0} <span className="text-muted-foreground text-xl">/ {report.lowRisks ?? 0}</span></p>
               </div>
             </div>
@@ -234,26 +250,21 @@ export default function ReportDetail() {
               <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs font-bold">3</span>
               Risk Breakdown by Category
             </h2>
-            {Object.keys(catMap).length === 0 ? (
-              <p className="text-sm text-muted-foreground">No risk flags found for this company.</p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {['VAT', 'Withholding Tax', 'PAYE', 'Expense', 'Revenue'].map(cat => {
-                  const data = catMap[cat];
-                  if (!data) return null;
-                  const cols = RISK_TYPE_COLORS[cat] ?? { bg: 'bg-muted', text: 'text-foreground', border: 'border-border' };
-                  return (
-                    <div key={cat} className={`rounded-xl p-4 border ${cols.bg} ${cols.border}`}>
-                      <p className={`text-xs font-bold uppercase tracking-wider mb-2 ${cols.text}`}>{cat}</p>
-                      <p className={`text-2xl font-bold ${cols.text}`}>{data.count}</p>
-                      <p className="text-xs font-medium text-muted-foreground mt-1">flags</p>
-                      <p className={`text-sm font-semibold mt-2 ${cols.text}`}>{formatCurrency(data.exposure)}</p>
-                      <p className="text-xs text-muted-foreground">estimated exposure</p>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              {ALL_CATEGORIES.map(cat => {
+                const catData = catMap[cat];
+                const cols = RISK_TYPE_COLORS[cat];
+                return (
+                  <div key={cat} className={`rounded-xl p-4 border ${cols.bg} ${cols.border}`}>
+                    <p className={`text-xs font-bold uppercase tracking-wider mb-2 ${cols.text}`}>{cat}</p>
+                    <p className={`text-2xl font-bold ${cols.text}`}>{catData.count}</p>
+                    <p className="text-xs font-medium text-muted-foreground mt-1">flag{catData.count !== 1 ? 's' : ''}</p>
+                    <p className={`text-sm font-semibold mt-2 ${cols.text}`}>{formatCurrency(catData.exposure)}</p>
+                    <p className="text-xs text-muted-foreground">est. exposure</p>
+                  </div>
+                );
+              })}
+            </div>
           </section>
 
           {/* Section 4 — Severity Analysis */}

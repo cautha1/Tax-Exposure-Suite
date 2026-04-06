@@ -127,7 +127,7 @@ function runPayeRules(tx: Transaction, rules: Set<string>, thresholds: Record<st
   const desc = (tx.description ?? "").toLowerCase();
   const isPayroll = payeCats.some(k => cat.includes(k) || desc.includes(k));
 
-  if (rules.has("PAYE-001") && isPayroll && !tx.taxType && amt > (thresholds["PAYE-001"] ?? 100000)) {
+  if (rules.has("PAYE-001") && isPayroll && tx.taxType !== "PAYE" && amt > (thresholds["PAYE-001"] ?? 100000)) {
     flags.push({
       companyId: tx.companyId, transactionId: tx.id,
       ruleCode: "PAYE-001", riskType: "PAYE",
