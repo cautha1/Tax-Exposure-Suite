@@ -17,6 +17,7 @@ import Upload from "./pages/transactions/upload";
 import Transactions from "./pages/transactions";
 import Risks from "./pages/risks";
 import Reports from "./pages/reports";
+import ReportDetail from "./pages/reports/[id]";
 import Settings from "./pages/settings";
 import NotFound from "./pages/not-found";
 
@@ -66,6 +67,7 @@ function Router() {
       
       <Route path="/risks"><ProtectedRoute component={Risks} /></Route>
       <Route path="/reports"><ProtectedRoute component={Reports} /></Route>
+      <Route path="/reports/:id"><ProtectedRoute component={ReportDetail} /></Route>
       <Route path="/settings"><ProtectedRoute component={Settings} /></Route>
 
       <Route component={NotFound} />
