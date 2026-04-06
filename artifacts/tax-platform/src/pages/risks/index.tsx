@@ -243,6 +243,11 @@ export default function Risks() {
                             {risk.status === 'reviewed' ? 'Reviewed' : 'Resolved'}: {new Date(risk.reviewedAt).toLocaleDateString()}
                           </span>
                         )}
+                        {risk.reviewedBy && (
+                          <span className="flex items-center gap-1">
+                            By: <span className="font-medium text-foreground">{risk.reviewedBy}</span>
+                          </span>
+                        )}
                         {risk.reviewNotes && <span className="italic">"{risk.reviewNotes}"</span>}
                       </div>
                     </div>

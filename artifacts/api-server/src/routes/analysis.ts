@@ -132,7 +132,7 @@ function runPayeRules(tx: Transaction, rules: Set<string>, thresholds: Record<st
       companyId: tx.companyId, transactionId: tx.id,
       ruleCode: "PAYE-001", riskType: "PAYE",
       description: `Payroll/salary payment with no PAYE recorded (Uganda top marginal rate 30%): ${tx.description ?? tx.vendorName ?? "Unknown"} (UGX ${amt.toLocaleString()})`,
-      severity: "high", estimatedExposure: String(amt * UG_PAYE_TOP_RATE * 0.3),
+      severity: "high", estimatedExposure: String(amt * UG_PAYE_TOP_RATE),
       status: "open", category: "PAYE",
     });
   }

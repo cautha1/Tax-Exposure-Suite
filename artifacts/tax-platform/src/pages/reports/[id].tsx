@@ -155,13 +155,13 @@ export default function ReportDetail() {
               <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs font-bold">1</span>
               Company Overview
             </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
               <div>
                 <p className="text-xs text-muted-foreground font-medium mb-1 flex items-center gap-1"><Building2 className="w-3 h-3" /> Company</p>
                 <p className="text-sm font-semibold text-foreground">{report.companyName ?? company?.companyName ?? '-'}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground font-medium mb-1 flex items-center gap-1"><Hash className="w-3 h-3" /> Tax ID</p>
+                <p className="text-xs text-muted-foreground font-medium mb-1 flex items-center gap-1"><Hash className="w-3 h-3" /> Tax ID (TIN)</p>
                 <p className="text-sm font-semibold text-foreground">{company?.tinOrTaxId ?? '-'}</p>
               </div>
               <div>
@@ -172,6 +172,18 @@ export default function ReportDetail() {
                 <p className="text-xs text-muted-foreground font-medium mb-1 flex items-center gap-1"><Calendar className="w-3 h-3" /> Financial Year</p>
                 <p className="text-sm font-semibold text-foreground">{company?.financialYear ?? '-'}</p>
               </div>
+              <div>
+                <p className="text-xs text-muted-foreground font-medium mb-1 flex items-center gap-1"><Calendar className="w-3 h-3" /> Period</p>
+                <p className="text-sm font-semibold text-foreground">
+                  {(report as any).periodStart && (report as any).periodEnd
+                    ? `${new Date((report as any).periodStart).toLocaleDateString('en-UG', { month: 'short', year: 'numeric' })} – ${new Date((report as any).periodEnd).toLocaleDateString('en-UG', { month: 'short', year: 'numeric' })}`
+                    : report.createdAt ? String(new Date(report.createdAt).getFullYear()) : '-'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground font-medium mb-1">Jurisdiction</p>
+                <p className="text-sm font-semibold text-foreground">Uganda (URA)</p>
+              </div>
             </div>
           </section>
 
@@ -181,9 +193,14 @@ export default function ReportDetail() {
               <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs font-bold">2</span>
               Executive Summary
             </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
               <div className="bg-muted/40 rounded-xl p-4">
-                <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider mb-1">Total Risks</p>
+                <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider mb-1">Transactions</p>
+                <p className="text-3xl font-bold text-foreground">{(report as any).transactionCount ?? '–'}</p>
+                <p className="text-xs text-muted-foreground">analysed</p>
+              </div>
+              <div className="bg-muted/40 rounded-xl p-4">
+                <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider mb-1">Total Flags</p>
                 <p className="text-3xl font-bold text-foreground">{risks.length}</p>
                 <p className="text-xs text-muted-foreground">{openRisks.length} open</p>
               </div>
@@ -192,13 +209,18 @@ export default function ReportDetail() {
                 <p className="text-xl font-bold text-rose-700">{formatCurrency(report.totalExposure)}</p>
                 <p className="text-xs text-rose-400">Indicative only</p>
               </div>
+              <div className={`rounded-xl p-4 border ${riskLevelColors[riskLevel]}`}>
+                <p className="text-xs font-semibold uppercase tracking-wider mb-1 opacity-70">Risk Score</p>
+                <p className="text-3xl font-bold">{riskScore}</p>
+                <p className="text-xs opacity-70 capitalize">{riskLevel} risk level</p>
+              </div>
               <div className="bg-muted/40 rounded-xl p-4">
                 <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider mb-1">High Risks</p>
                 <p className="text-3xl font-bold text-rose-600">{report.highRisks ?? 0}</p>
               </div>
               <div className="bg-muted/40 rounded-xl p-4">
                 <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider mb-1">Medium / Low</p>
-                <p className="text-3xl font-bold text-amber-600">{report.mediumRisks ?? 0} <span className="text-muted-foreground text-xl">/ {report.lowRisks ?? 0}</span></p>
+                <p className="text-2xl font-bold text-amber-600">{report.mediumRisks ?? 0} <span className="text-muted-foreground text-xl">/ {report.lowRisks ?? 0}</span></p>
               </div>
             </div>
             <p className="text-xs text-muted-foreground mt-4 p-3 bg-amber-50 rounded-lg border border-amber-100">

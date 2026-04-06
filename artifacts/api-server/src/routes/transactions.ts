@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, transactionsTable, uploadsTable, companiesTable, taxRiskFlagsTable } from "../lib/db.js";
-import { eq, ilike, and, gte, lte, or, count, asc, desc, sql } from "drizzle-orm";
+import { eq, ilike, and, gte, lte, or, count, asc, desc, sql, isNull } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -40,7 +40,11 @@ router.get("/transactions", async (req, res) => {
     const conditions = [];
     if (companyId) conditions.push(eq(transactionsTable.companyId, companyId));
     if (uploadId) conditions.push(eq(transactionsTable.uploadId!, uploadId));
-    if (taxType) conditions.push(eq(transactionsTable.taxType, taxType));
+    if (taxType === "NONE") {
+      conditions.push(isNull(transactionsTable.taxType));
+    } else if (taxType) {
+      conditions.push(eq(transactionsTable.taxType, taxType));
+    }
     if (transactionType) conditions.push(eq(transactionsTable.transactionType, transactionType));
     if (dateFrom) conditions.push(gte(transactionsTable.transactionDate, dateFrom));
     if (dateTo) conditions.push(lte(transactionsTable.transactionDate, dateTo));

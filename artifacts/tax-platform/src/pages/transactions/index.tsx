@@ -157,6 +157,7 @@ export default function Transactions() {
                 <option value="VAT">VAT (18%)</option>
                 <option value="WHT">WHT (15%)</option>
                 <option value="PAYE">PAYE (30%)</option>
+                <option value="NONE">None (unclassified)</option>
               </select>
 
               <select
