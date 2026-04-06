@@ -1,0 +1,225 @@
+Build a Tax Risk Workflow System inside my existing FastAPI backend.
+
+This system must manage the lifecycle of tax risks in a professional advisory workflow.
+
+🎯 OBJECTIVE
+
+Implement a full workflow for tax risks:
+
+OPEN → REVIEWED → RESOLVED
+
+And ensure the frontend can display:
+
+Open risks tab
+Reviewed risks tab
+Resolved risks tab
+⚙️ TECH STACK
+Python
+FastAPI
+Supabase (database)
+Pydantic
+🧩 DATABASE UPDATE (IMPORTANT)
+
+Update tax_risk_flags table to include:
+
+alter table public.tax_risk_flags
+add column if not exists reviewed_by uuid,
+add column if not exists reviewed_at timestamptz,
+add column if not exists resolved_by uuid,
+add column if not exists resolved_at timestamptz,
+add column if not exists internal_note text;
+🧠 REQUIRED FEATURES
+1. GET RISKS BY STATUS (FOR TABS)
+
+Create endpoint:
+
+GET /api/risks
+
+Query params:
+
+status (open, reviewed, resolved)
+company_id
+severity
+risk_type
+page
+page_size
+
+Return filtered results.
+
+2. MARK RISK AS REVIEWED
+
+Endpoint:
+
+PATCH /api/risks/{risk_id}/review
+
+Logic:
+
+set status = 'reviewed'
+set reviewed_by = current_user
+set reviewed_at = now()
+
+Return updated risk
+
+3. MARK RISK AS RESOLVED
+
+Endpoint:
+
+PATCH /api/risks/{risk_id}/resolve
+
+Logic:
+
+set status = 'resolved'
+set resolved_by = current_user
+set resolved_at = now()
+
+Return updated risk
+
+4. ADD INTERNAL NOTE
+
+Endpoint:
+
+PATCH /api/risks/{risk_id}/note
+
+Body:
+
+{
+  "note": "Waiting for client confirmation"
+}
+
+Logic:
+
+update internal_note field
+5. GET SINGLE RISK DETAIL
+
+Endpoint:
+
+GET /api/risks/{risk_id}
+
+Return:
+
+risk details
+transaction details
+company info
+🧠 SERVICE LAYER (IMPORTANT)
+
+Create:
+
+risk_workflow_service.py
+
+Functions:
+
+def get_risks(filters):
+    pass
+
+def mark_as_reviewed(risk_id, user_id):
+    pass
+
+def mark_as_resolved(risk_id, user_id):
+    pass
+
+def add_note(risk_id, note):
+    pass
+
+def get_risk_detail(risk_id):
+    pass
+🔐 USER CONTEXT
+
+Assume current user is available (mock if needed):
+
+current_user_id = "mock-user-id"
+🧩 Pydantic Models
+
+Create:
+
+class RiskUpdateResponse(BaseModel):
+    id: str
+    status: str
+    reviewed_by: Optional[str]
+    reviewed_at: Optional[datetime]
+    resolved_by: Optional[str]
+    resolved_at: Optional[datetime]
+    internal_note: Optional[str]
+🔁 FRONTEND EXPECTED BEHAVIOR
+
+The frontend will:
+
+Tabs:
+/risks?status=open
+/risks?status=reviewed
+/risks?status=resolved
+When user clicks risk:
+
+Call:
+
+GET /api/risks/{risk_id}
+Buttons:
+Mark Reviewed
+
+→ PATCH /api/risks/{id}/review
+
+Mark Resolved
+
+→ PATCH /api/risks/{id}/resolve
+
+Add Note
+
+→ PATCH /api/risks/{id}/note
+
+🎯 UX BEHAVIOR (IMPORTANT)
+
+When a risk is updated:
+
+If marked reviewed → move to Reviewed tab
+If marked resolved → move to Resolved tab
+Open tab auto-refreshes
+📊 EXTRA (OPTIONAL BUT STRONG)
+
+Add:
+
+Risk counts endpoint
+GET /api/risks/summary
+
+Return:
+
+open_count
+reviewed_count
+resolved_count
+total_exposure
+🧠 FINAL REQUIREMENT
+
+Generate:
+
+FastAPI routes
+service layer
+Supabase queries
+models
+working endpoints
+
+Make sure:
+
+code is clean
+error handling is included
+responses are structured
+endpoints are functional
+🔥 RESULT
+
+This will give you:
+
+✅ Real workflow system
+✅ Advisor-style risk management
+✅ BDO-level UX logic
+✅ Clear lifecycle tracking
+
+🧠 Final Insight
+
+What you just added is:
+
+👉 a Tax Risk Case Management System
+
+That is EXACTLY how:
+
+BDO
+Deloitte
+PwC
+
+manage risk internally.
