@@ -1,4 +1,7 @@
-const BASE_URL = "/api";
+// API base URL — configurable via VITE_API_BASE_URL env var
+// In development: proxied by Vite to http://localhost:8080
+// In production: set VITE_API_BASE_URL to your deployed backend URL
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
 
 function getSession() {
   try {

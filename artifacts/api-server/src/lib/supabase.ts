@@ -1,10 +1,19 @@
 import { createClient } from "@supabase/supabase-js";
 
-// TaxIntel Supabase project — fixed credentials, do not change
-const SUPABASE_URL = "https://wqkcnnstnrhbttcnhvne.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indxa2NubnN0bnJoYnR0Y25odm5lIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDg1MTM3MywiZXhwIjoyMDkwNDI3MzczfQ.ICVU3K4Gs3K5qgvGK7iINMRf8fvHc2HbEo5LjN2fbEI";
+// TaxIntel Supabase project
+// Reads from TAXINTEL_DB_URL / TAXINTEL_DB_KEY env vars (set in .env for local dev)
+// Falls back to hardcoded project values to guarantee operation in all environments.
+// The service role key NEVER leaves this backend file.
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+const SUPABASE_URL =
+  process.env.TAXINTEL_DB_URL ??
+  "https://wqkcnnstnrhbttcnhvne.supabase.co";
+
+const SUPABASE_SERVICE_ROLE_KEY =
+  process.env.TAXINTEL_DB_KEY ??
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indxa2NubnN0bnJoYnR0Y25odm5lIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDg1MTM3MywiZXhwIjoyMDkwNDI3MzczfQ.ICVU3K4Gs3K5qgvGK7iINMRf8fvHc2HbEo5LjN2fbEI";
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
