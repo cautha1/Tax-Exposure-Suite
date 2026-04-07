@@ -1,10 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 
-// TaxIntel Supabase project
-// Reads from TAXINTEL_DB_URL / TAXINTEL_DB_KEY env vars (set in .env for local dev)
-// Falls back to hardcoded project values to guarantee operation in all environments.
-// The service role key NEVER leaves this backend file.
-
 const SUPABASE_URL = "https://wqkcnnstnrhbttcnhvne.supabase.co";
 
 const SUPABASE_SERVICE_ROLE_KEY =
