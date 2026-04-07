@@ -25,16 +25,25 @@ export default function Signup() {
     resolver: zodResolver(signupSchema),
     defaultValues: { role: 'advisor' }
   });
-
   const onSubmit = async (data: SignupForm) => {
     try {
       setError('');
-      await signup(data.email, data.password, data.fullName, data.role);
-    } catch (err) {
-      setError('Registration failed. Please try again.');
+      console.log('Submitting signup:', data);
+
+      const result = await signup(
+        data.email,
+        data.password,
+        data.fullName,
+        data.role
+      );
+
+      console.log('Signup result:', result);
+    } catch (err: any) {
+      console.error('Signup error:', err);
+      setError(err?.message || 'Registration failed. Please try again.');
     }
   };
-
+  
   return (
     <div className="min-h-screen bg-muted/30 flex items-center justify-center p-4 py-12">
       <motion.div 
