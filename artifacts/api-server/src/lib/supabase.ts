@@ -1,28 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 
-// Supabase project URL (not sensitive — safe to hardcode)
-const url = "https://lugfeobnitcuksouuwia.supabase.co";
+// TaxIntel Supabase project — fixed credentials, do not change
+const SUPABASE_URL = "https://wqkcnnstnrhbttcnhvne.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indxa2NubnN0bnJoYnR0Y25odm5lIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDg1MTM3MywiZXhwIjoyMDkwNDI3MzczfQ.ICVU3K4Gs3K5qgvGK7iINMRf8fvHc2HbEo5LjN2fbEI";
 
-// Service role key — kept in Replit Secrets as SUPABASE_SERVICE_ROLE_KEY
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-if (!key) {
-  throw new Error("SUPABASE_SERVICE_ROLE_KEY must be set in Replit Secrets");
-}
-
-// Diagnostic: log which project we're connecting to (URL is not sensitive)
-const keyRef = (() => {
-  try {
-    return JSON.parse(Buffer.from(key.split(".")[1]!, "base64url").toString()).ref ?? "unknown";
-  } catch { return "unreadable"; }
-})();
-console.log(`[Supabase] Connecting to: ${url}`);
-console.log(`[Supabase] Key belongs to project ref: ${keyRef}`);
-if (keyRef !== "lugfeobnitcuksouuwia") {
-  console.warn(`[Supabase] WARNING: Key project ref (${keyRef}) does not match URL project. Requests will fail!`);
-}
-
-export const supabase = createClient(url, key, {
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
