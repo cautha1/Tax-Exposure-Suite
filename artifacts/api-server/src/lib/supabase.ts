@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 // Supabase project URL (not sensitive — safe to hardcode)
-const url = "https://wqkcnnstnrhbttcnhvne.supabase.co";
+const url = "https://lugfeobnitcuksouuwia.supabase.co";
 
 // Service role key — kept in Replit Secrets as SUPABASE_SERVICE_ROLE_KEY
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -18,7 +18,7 @@ const keyRef = (() => {
 })();
 console.log(`[Supabase] Connecting to: ${url}`);
 console.log(`[Supabase] Key belongs to project ref: ${keyRef}`);
-if (keyRef !== "wqkcnnstnrhbttcnhvne") {
+if (keyRef !== "lugfeobnitcuksouuwia") {
   console.warn(`[Supabase] WARNING: Key project ref (${keyRef}) does not match URL project. Requests will fail!`);
 }
 
