@@ -81,3 +81,4 @@ export function useAuth() {
 
   return { ...session, login, signup, logout };
 }
+
