@@ -1,13 +1,28 @@
 import React, { useState } from 'react';
 import { Link } from 'wouter';
 import { AppLayout } from '@/components/layout';
-import { useListCompanies, useCreateCompany } from '@workspace/api-client-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '@/lib/api';
 import { Building2, Search, Plus, ExternalLink, ShieldAlert, Loader2 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
+
+interface Company {
+  id: string;
+  companyName: string;
+  tinOrTaxId: string | null;
+  industry: string | null;
+  country: string | null;
+  financialYear: string | null;
+  riskLevel: string | null;
+  riskScore: number | null;
+  transactionCount: number | null;
+  openFlagsCount: number | null;
+  estimatedExposure: number | null;
+  createdAt: string;
+}
 
 const companySchema = z.object({
   companyName: z.string().min(2, "Name is required"),
@@ -23,24 +38,27 @@ export default function Clients() {
   const [search, setSearch] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const queryClient = useQueryClient();
-  
-  const { data: companies, isLoading } = useListCompanies({ search: search || undefined });
-  const createMutation = useCreateCompany({
-    mutation: {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ['/api/companies'] });
-        setIsAddModalOpen(false);
-        reset();
-      }
-    }
+
+  const { data: companies, isLoading } = useQuery<Company[]>({
+    queryKey: ['companies', search],
+    queryFn: () => api.get<Company[]>('/companies' + (search ? `?search=${encodeURIComponent(search)}` : '')),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data: CompanyForm) => api.post<Company>('/companies', data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['companies'] });
+      setIsAddModalOpen(false);
+      reset();
+    },
   });
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<CompanyForm>({
-    resolver: zodResolver(companySchema)
+    resolver: zodResolver(companySchema),
   });
 
   const onSubmit = (data: CompanyForm) => {
-    createMutation.mutate({ data });
+    createMutation.mutate(data);
   };
 
   const getRiskColor = (level?: string | null) => {
@@ -59,7 +77,7 @@ export default function Clients() {
             <h1 className="text-3xl font-display font-bold text-foreground">Clients</h1>
             <p className="text-muted-foreground mt-1">Manage client workspaces and tax profiles.</p>
           </div>
-          <button 
+          <button
             onClick={() => setIsAddModalOpen(true)}
             className="px-4 py-2.5 bg-primary text-primary-foreground font-semibold rounded-xl shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 flex items-center gap-2"
           >
@@ -71,9 +89,9 @@ export default function Clients() {
           <div className="p-4 border-b border-border/60 flex items-center gap-4">
             <div className="relative flex-1 max-w-md">
               <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input 
-                type="text" 
-                placeholder="Search companies by name or Tax ID..." 
+              <input
+                type="text"
+                placeholder="Search companies by name or Tax ID..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full pl-10 pr-4 py-2.5 bg-muted/30 border border-input rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
@@ -133,7 +151,7 @@ export default function Clients() {
                         {company.transactionCount ? new Intl.NumberFormat('en-US').format(company.transactionCount) : '0'} lines
                       </td>
                       <td className="p-4 pr-6 text-right">
-                        <Link 
+                        <Link
                           href={`/clients/${company.id}`}
                           className="inline-flex items-center justify-center w-9 h-9 rounded-lg hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors"
                         >
@@ -149,16 +167,15 @@ export default function Clients() {
         </div>
       </div>
 
-      {/* Add Client Modal */}
       <AnimatePresence>
         {isAddModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="absolute inset-0 bg-black/40 backdrop-blur-sm"
               onClick={() => setIsAddModalOpen(false)}
             />
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -181,7 +198,7 @@ export default function Clients() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium mb-1">Country</label>
-                    <input {...register('country')} className="w-full px-4 py-2.5 rounded-xl border border-input focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
+                    <input {...register('country')} defaultValue="Uganda" className="w-full px-4 py-2.5 rounded-xl border border-input focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
                     {errors.country && <p className="text-destructive text-xs mt-1">{errors.country.message}</p>}
                   </div>
                   <div>
@@ -189,7 +206,6 @@ export default function Clients() {
                     <input {...register('industry')} className="w-full px-4 py-2.5 rounded-xl border border-input focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
                   </div>
                 </div>
-                
                 <div className="pt-4 flex justify-end gap-3">
                   <button type="button" onClick={() => setIsAddModalOpen(false)} className="px-5 py-2.5 rounded-xl font-medium text-muted-foreground hover:bg-muted transition-colors">
                     Cancel

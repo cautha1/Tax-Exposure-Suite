@@ -1,35 +1,59 @@
 import React, { useState } from 'react';
 import { AppLayout } from '@/components/layout';
-import { useListReports, useGenerateReport, useListCompanies } from '@workspace/api-client-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '@/lib/api';
 import { FileText, Plus, ExternalLink, Loader2, TrendingUp } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'wouter';
 
+interface Company {
+  id: string;
+  companyName: string;
+}
+
+interface Report {
+  id: string;
+  companyId: string;
+  companyName: string | null;
+  title: string | null;
+  status: string | null;
+  totalExposure: number | null;
+  highRisks: number | null;
+  mediumRisks: number | null;
+  lowRisks: number | null;
+  createdAt: string;
+}
+
 export default function Reports() {
-  const { data: reports, isLoading } = useListReports();
-  const { data: companies } = useListCompanies();
+  const { data: reports, isLoading } = useQuery<Report[]>({
+    queryKey: ['reports'],
+    queryFn: () => api.get<Report[]>('/reports'),
+  });
+
+  const { data: companies } = useQuery<Company[]>({
+    queryKey: ['companies'],
+    queryFn: () => api.get<Company[]>('/companies'),
+  });
+
   const [selectedCompany, setSelectedCompany] = useState('');
   const [justGenerated, setJustGenerated] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
-  const generateMutation = useGenerateReport({
-    mutation: {
-      onSuccess: (data) => {
-        queryClient.invalidateQueries({ queryKey: ['/api/reports'] });
-        setJustGenerated(data.id);
-        setSelectedCompany('');
-      }
-    }
+  const generateMutation = useMutation({
+    mutationFn: (payload: { companyId: string; title: string }) =>
+      api.post<Report>('/reports', payload),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      setJustGenerated(data.id);
+      setSelectedCompany('');
+    },
   });
 
   const handleGenerate = () => {
     if (!selectedCompany) return;
     const company = companies?.find(c => c.id === selectedCompany);
     generateMutation.mutate({
-      data: {
-        companyId: selectedCompany,
-        title: `Tax Health Check — ${company?.companyName ?? 'Client'} ${new Date().getFullYear()}`,
-      }
+      companyId: selectedCompany,
+      title: `Tax Health Check — ${company?.companyName ?? 'Client'} ${new Date().getFullYear()}`,
     });
   };
 
@@ -83,7 +107,7 @@ export default function Reports() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {isLoading ? (
-            [1,2,3].map(i => <div key={i} className="h-64 bg-muted rounded-2xl animate-pulse" />)
+            [1, 2, 3].map(i => <div key={i} className="h-64 bg-muted rounded-2xl animate-pulse" />)
           ) : reports?.length === 0 ? (
             <div className="col-span-full p-16 text-center text-muted-foreground bg-card rounded-2xl border border-border border-dashed">
               <FileText className="w-12 h-12 mx-auto mb-4 opacity-20" />

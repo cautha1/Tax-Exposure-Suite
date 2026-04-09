@@ -5,13 +5,43 @@ import {
 } from 'lucide-react';
 import { useRoute, Link } from 'wouter';
 import { AppLayout } from '@/components/layout';
-import { useGetReport, useGetCompany, type Report } from '@workspace/api-client-react';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 
-interface ReportExtended extends Report {
+interface Report {
+  id: string;
+  companyId: string;
+  companyName: string | null;
+  title: string | null;
+  status: string | null;
+  summary: string | null;
+  totalExposure: number | null;
+  highRisks: number | null;
+  mediumRisks: number | null;
+  lowRisks: number | null;
+  createdAt: string;
   periodStart?: string | null;
   periodEnd?: string | null;
   transactionCount?: number | null;
+}
+
+interface Company {
+  id: string;
+  companyName: string;
+  tinOrTaxId: string | null;
+  country: string | null;
+  financialYear: string | null;
+}
+
+interface Risk {
+  id: string;
+  riskType: string | null;
+  ruleCode: string | null;
+  description: string | null;
+  severity: string | null;
+  estimatedExposure: number | null;
+  category: string | null;
+  status: string | null;
 }
 
 const ALL_CATEGORIES = ['VAT', 'Withholding Tax', 'PAYE', 'Expense', 'Revenue'] as const;
@@ -38,26 +68,20 @@ const RECOMMENDATIONS: Record<string, string> = {
   'Revenue':         'Verify all revenue streams are correctly classified for tax purposes. Large unclassified revenue may attract VAT and income tax obligations.',
 };
 
-interface Risk {
-  id: string;
-  riskType: string | null;
-  ruleCode: string | null;
-  description: string | null;
-  severity: string | null;
-  estimatedExposure: number | null;
-  category: string | null;
-  status: string | null;
-}
-
 export default function ReportDetail() {
   const [, params] = useRoute('/reports/:id');
   const id = params?.id ?? '';
 
-  const { data: rawReport, isLoading: reportLoading } = useGetReport(id);
-  const report = rawReport as ReportExtended | undefined;
+  const { data: report, isLoading: reportLoading } = useQuery<Report>({
+    queryKey: ['report', id],
+    queryFn: () => api.get<Report>(`/reports/${id}`),
+    enabled: !!id,
+  });
 
-  const { data: company, isLoading: companyLoading } = useGetCompany(report?.companyId ?? '', {
-    query: { enabled: !!report?.companyId },
+  const { data: company, isLoading: companyLoading } = useQuery<Company>({
+    queryKey: ['company', report?.companyId],
+    queryFn: () => api.get<Company>(`/companies/${report!.companyId}`),
+    enabled: !!report?.companyId,
   });
 
   const [risks, setRisks] = useState<Risk[]>([]);
@@ -169,7 +193,6 @@ export default function ReportDetail() {
         </p>
 
         <div className="space-y-6">
-          {/* Section 1 — Company Overview */}
           <section className="bg-card rounded-2xl border border-border shadow-sm p-6">
             <h2 className="text-base font-bold text-foreground mb-4 flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs font-bold">1</span>
@@ -203,7 +226,6 @@ export default function ReportDetail() {
             </div>
           </section>
 
-          {/* Section 2 — Executive Summary */}
           <section className="bg-card rounded-2xl border border-border shadow-sm p-6">
             <h2 className="text-base font-bold text-foreground mb-4 flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs font-bold">2</span>
@@ -244,7 +266,6 @@ export default function ReportDetail() {
             </p>
           </section>
 
-          {/* Section 3 — Risk Breakdown */}
           <section className="bg-card rounded-2xl border border-border shadow-sm p-6">
             <h2 className="text-base font-bold text-foreground mb-4 flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs font-bold">3</span>
@@ -267,7 +288,6 @@ export default function ReportDetail() {
             </div>
           </section>
 
-          {/* Section 4 — Severity Analysis */}
           <section className="bg-card rounded-2xl border border-border shadow-sm p-6">
             <h2 className="text-base font-bold text-foreground mb-4 flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs font-bold">4</span>
@@ -299,7 +319,6 @@ export default function ReportDetail() {
             </div>
           </section>
 
-          {/* Section 5 — Key Findings */}
           <section className="bg-card rounded-2xl border border-border shadow-sm p-6">
             <h2 className="text-base font-bold text-foreground mb-4 flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs font-bold">5</span>
@@ -341,7 +360,6 @@ export default function ReportDetail() {
             )}
           </section>
 
-          {/* Section 6 — Recommendations */}
           <section className="bg-card rounded-2xl border border-border shadow-sm p-6">
             <h2 className="text-base font-bold text-foreground mb-4 flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs font-bold">6</span>
