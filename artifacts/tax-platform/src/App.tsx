@@ -3,7 +3,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/use-auth";
-import { setCustomHeaders } from "@workspace/api-client-react";
 import React, { useEffect } from "react";
 
 // Pages
@@ -41,7 +40,11 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
   }, [isLoading, isAuthenticated, setLocation]);
 
   if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center bg-background"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div></div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
   }
 
   if (!isAuthenticated) return null;
@@ -55,16 +58,15 @@ function Router() {
       <Route path="/" component={LandingPage} />
       <Route path="/login" component={Login} />
       <Route path="/signup" component={Signup} />
-      
-      {/* Protected Routes */}
+
       <Route path="/dashboard"><ProtectedRoute component={Dashboard} /></Route>
-      
+
       <Route path="/clients"><ProtectedRoute component={Clients} /></Route>
       <Route path="/clients/:id"><ProtectedRoute component={ClientDetail} /></Route>
-      
+
       <Route path="/transactions"><ProtectedRoute component={Transactions} /></Route>
       <Route path="/transactions/upload"><ProtectedRoute component={Upload} /></Route>
-      
+
       <Route path="/risks"><ProtectedRoute component={Risks} /></Route>
       <Route path="/reports"><ProtectedRoute component={Reports} /></Route>
       <Route path="/reports/:id"><ProtectedRoute component={ReportDetail} /></Route>
@@ -75,24 +77,11 @@ function Router() {
   );
 }
 
-function AuthHeaderSync() {
-  const { user } = useAuth();
-  useEffect(() => {
-    if (user?.id) {
-      setCustomHeaders({ "x-user-id": user.id });
-    } else {
-      setCustomHeaders({});
-    }
-  }, [user?.id]);
-  return null;
-}
-
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <AuthHeaderSync />
           <Router />
         </WouterRouter>
         <Toaster />
