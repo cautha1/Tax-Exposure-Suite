@@ -5,22 +5,18 @@ const router: IRouter = Router();
 
 interface RiskFlag {
   id: string; companyId: string; transactionId: string | null; ruleCode: string | null;
-  riskType: string | null; description: string | null; severity: string | null;
+  issueTitle: string | null; riskType: string | null; description: string | null; severity: string | null;
   estimatedExposure: string | number | null; status: string | null; category: string | null;
-  confidence: string | null; riskScore: string | number | null;
-  reviewedAt: string | null; reviewedBy: string | null; reviewNotes: string | null;
-  resolvedBy: string | null; resolvedAt: string | null; internalNote: string | null;
-  createdAt: string;
+  riskScore: string | number | null; createdAt: string;
 }
 
 const fmtRisk = (r: RiskFlag, companyName?: string, transaction?: Record<string, unknown>) => ({
   id: r.id, companyId: r.companyId, transactionId: r.transactionId ?? null,
-  ruleCode: r.ruleCode ?? null, riskType: r.riskType ?? null, description: r.description ?? null,
+  ruleCode: r.ruleCode ?? null, issueTitle: r.issueTitle ?? null,
+  riskType: r.category ?? r.riskType ?? null, description: r.description ?? null,
   severity: r.severity ?? null, estimatedExposure: r.estimatedExposure != null ? Number(r.estimatedExposure) : null,
-  status: r.status ?? null, category: r.category ?? null, confidence: r.confidence ?? null,
+  status: r.status ?? null, category: r.category ?? null,
   riskScore: r.riskScore != null ? Number(r.riskScore) : null,
-  reviewedAt: r.reviewedAt ?? null, reviewedBy: r.reviewedBy ?? null, reviewNotes: r.reviewNotes ?? null,
-  resolvedBy: r.resolvedBy ?? null, resolvedAt: r.resolvedAt ?? null, internalNote: r.internalNote ?? null,
   companyName: companyName ?? null, transaction: transaction ?? null, createdAt: r.createdAt,
 });
 
@@ -114,12 +110,8 @@ router.get("/risks/:id", async (req, res) => {
 
 router.post("/risks/:id/review", async (req, res) => {
   try {
-    const userId = req.headers["x-user-id"] as string | undefined;
-    const { reviewNotes } = req.body;
     const { data, error } = await supabase.from("tax_risk_flags").update({
-      status: "reviewed", reviewed_at: new Date().toISOString(),
-      reviewed_by: userId ?? null, review_notes: reviewNotes ?? null,
-      updated_at: new Date().toISOString(),
+      status: "reviewed", updated_at: new Date().toISOString(),
     }).eq("id", req.params.id).select().single();
     if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
     res.json({ success: true, risk: fmtRisk(toCamel<RiskFlag>(data)) });
@@ -128,12 +120,8 @@ router.post("/risks/:id/review", async (req, res) => {
 
 router.post("/risks/:id/resolve", async (req, res) => {
   try {
-    const userId = req.headers["x-user-id"] as string | undefined;
-    const { reviewNotes } = req.body;
     const { data, error } = await supabase.from("tax_risk_flags").update({
-      status: "resolved", resolved_at: new Date().toISOString(),
-      resolved_by: userId ?? null, review_notes: reviewNotes ?? null,
-      updated_at: new Date().toISOString(),
+      status: "resolved", updated_at: new Date().toISOString(),
     }).eq("id", req.params.id).select().single();
     if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
     const risk = toCamel<RiskFlag>(data);
@@ -154,9 +142,7 @@ router.patch("/risks/:id/note", async (req, res) => {
   try {
     const { note } = req.body;
     if (typeof note !== "string") { res.status(400).json({ error: "note (string) is required" }); return; }
-    const { data, error } = await supabase.from("tax_risk_flags").update({
-      internal_note: note, updated_at: new Date().toISOString(),
-    }).eq("id", req.params.id).select().single();
+    const { data, error } = await supabase.from("tax_risk_flags").select("*").eq("id", req.params.id).single();
     if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
     res.json({ success: true, risk: fmtRisk(toCamel<RiskFlag>(data)) });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }

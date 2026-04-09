@@ -7,6 +7,11 @@ const SUPABASE_SERVICE_ROLE_KEY =
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
+  global: {
+    headers: {
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+  },
 });
 
 export function toCamel<T = Record<string, unknown>>(obj: unknown): T {

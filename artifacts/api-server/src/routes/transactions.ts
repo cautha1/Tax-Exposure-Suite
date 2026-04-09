@@ -107,22 +107,27 @@ router.post("/transactions/upload", async (req, res) => {
 
     const newFlags: Record<string, unknown>[] = [];
 
+    const nullIfEmpty = (v: string | undefined | null) =>
+      (v === "" || v == null) ? null : v;
+    const numOrNull = (v: string | undefined | null) =>
+      (v === "" || v == null || isNaN(Number(v))) ? null : v;
+
     if (validRows.length > 0) {
       const rows = validRows.map(t => ({
         company_id: companyId, upload_id: upload.id,
-        transaction_date: t.transaction_date ?? null,
-        description: t.description ?? null,
-        reference: t.reference ?? null,
-        amount: t.amount ?? null,
-        currency: t.currency ?? "UGX",
-        account_code: t.account_code ?? null,
-        account_category: t.account_category ?? null,
-        vendor_name: t.vendor_name ?? null,
-        customer_name: t.customer_name ?? null,
-        tax_type: t.tax_type ?? null,
-        vat_amount: t.vat_amount ?? null,
-        withholding_tax_amount: t.withholding_tax_amount ?? null,
-        transaction_type: t.transaction_type ?? null,
+        transaction_date: nullIfEmpty(t.transaction_date),
+        description: nullIfEmpty(t.description),
+        reference: nullIfEmpty(t.reference),
+        amount: numOrNull(t.amount),
+        currency: nullIfEmpty(t.currency) ?? "UGX",
+        account_code: nullIfEmpty(t.account_code),
+        account_category: nullIfEmpty(t.account_category),
+        vendor_name: nullIfEmpty(t.vendor_name),
+        customer_name: nullIfEmpty(t.customer_name),
+        tax_type: nullIfEmpty(t.tax_type),
+        vat_amount: numOrNull(t.vat_amount),
+        withholding_tax_amount: numOrNull(t.withholding_tax_amount),
+        transaction_type: nullIfEmpty(t.transaction_type),
       }));
 
       const { error: txErr } = await supabase.from("transactions").insert(rows);
@@ -136,13 +141,13 @@ router.post("/transactions/upload", async (req, res) => {
         const isService = ["services", "professional", "consulting", "contractor", "commission"].some(k => cat.includes(k));
 
         if (t.tax_type === "VAT" && vat === 0 && amt > 0) {
-          newFlags.push({ company_id: companyId, rule_code: "VAT-001", risk_type: "VAT", description: `Zero VAT on taxable transaction (Uganda rate 18%): ${t.description ?? t.reference ?? "Unknown"}`, severity: "high", estimated_exposure: amt * 0.18, status: "open", category: "VAT" });
+          newFlags.push({ company_id: companyId, rule_code: "VAT-001", issue_title: "Missing VAT on Taxable Transaction", risk_type: "VAT", description: `Zero VAT on taxable transaction (Uganda rate 18%): ${t.description ?? t.reference ?? "Unknown"}`, severity: "high", estimated_exposure: amt * 0.18, status: "open", category: "VAT" });
         }
         if (t.tax_type === "WHT" && wht === 0 && amt > 0) {
-          newFlags.push({ company_id: companyId, rule_code: "WHT-001", risk_type: "Withholding Tax", description: `Missing WHT on WHT-type transaction (Uganda rate 15%): ${t.description ?? "Unknown"}`, severity: "high", estimated_exposure: amt * 0.15, status: "open", category: "Withholding Tax" });
+          newFlags.push({ company_id: companyId, rule_code: "WHT-001", issue_title: "WHT Not Deducted (15%)", risk_type: "VAT", description: `Missing WHT on WHT-type transaction (Uganda rate 15%): ${t.description ?? "Unknown"}`, severity: "high", estimated_exposure: amt * 0.15, status: "open", category: "Withholding Tax" });
         }
         if (isService && wht === 0 && amt > 500000) {
-          newFlags.push({ company_id: companyId, rule_code: "WHT-002", risk_type: "Withholding Tax", description: `Service payment with no WHT deducted (Uganda WHT 15%): ${t.vendor_name ?? t.description ?? "Unknown"} (UGX ${amt.toLocaleString()})`, severity: "high", estimated_exposure: amt * 0.15, status: "open", category: "Withholding Tax" });
+          newFlags.push({ company_id: companyId, rule_code: "WHT-002", issue_title: "WHT Not Deducted on Service Payment", risk_type: "VAT", description: `Service payment with no WHT deducted (Uganda WHT 15%): ${t.vendor_name ?? t.description ?? "Unknown"} (UGX ${amt.toLocaleString()})`, severity: "high", estimated_exposure: amt * 0.15, status: "open", category: "Withholding Tax" });
         }
       }
 

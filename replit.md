@@ -39,14 +39,31 @@ artifacts-monorepo/
 └── ...
 ```
 
-## Database Tables
+## Database Tables (Supabase: wqkcnnstnrhbttcnhvne)
 
-- `profiles` — Users with email/password auth, roles (admin, advisor, client_user)
+- `profiles` — Users with email/password auth, roles (admin, advisor)
 - `companies` — Client companies with risk scores, exposure estimates
 - `uploads` — CSV file upload records
 - `transactions` — Individual transaction rows from CSV uploads
-- `tax_risk_flags` — Flagged tax compliance risks with severity and exposure
-- `reports` — Generated tax exposure reports
+- `tax_risk_flags` — Flagged tax compliance risks. **Live DB schema notes:**
+  - `risk_type` has CHECK constraint that only allows `'VAT'` — code always sets `risk_type='VAT'` and uses `category` field for semantic type display
+  - `issue_title` is NOT NULL — always provided from `RULE_TITLES` map
+  - `confidence`, `reviewed_at`, `reviewed_by`, `review_notes`, `resolved_at`, `resolved_by`, `internal_note` columns do NOT exist in the live DB
+  - Columns that DO exist: `id`, `company_id`, `transaction_id`, `rule_code`, `description`, `severity`, `estimated_exposure`, `status`, `category`, `risk_type`, `issue_title`, `risk_score`, `created_at`, `updated_at`
+- `reports` — Generated tax exposure reports. Missing v2 columns: `risk_level`, `risk_score`, `period_start`, `period_end`, `transaction_count`
+
+## Uganda Tax Rules (URA)
+
+- VAT: 18% (standard rate)
+- WHT (Withholding Tax): 15% on services, professional fees, contractor payments
+- PAYE top marginal rate: 30%
+- Rules engine: VAT-001/002/003, WHT-001/002/003, PAYE-001, EXP-001/002/003, REV-001/002
+
+## Supabase Client Setup
+
+- Must use `global: { headers: { Authorization: Bearer KEY } }` in `createClient()` to bypass RLS for writes
+- Env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+- Direct PostgreSQL connection is blocked from the Replit environment (only HTTPS to Supabase REST API works)
 
 ## API Routes
 
