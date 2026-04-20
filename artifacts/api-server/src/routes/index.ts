@@ -11,6 +11,7 @@ import analysisRouter from "./analysis";
 import rulesRouter from "./rules";
 import aiRouter from "./ai";
 import riskScoreRouter from "./riskScore";
+import ragRouter from "./rag";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(analysisRouter);
 router.use(rulesRouter);
 router.use(aiRouter);
 router.use(riskScoreRouter);
+router.use(ragRouter);
 
 export default router;
