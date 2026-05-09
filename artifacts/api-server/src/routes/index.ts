@@ -11,11 +11,13 @@ import analysisRouter from "./analysis";
 import rulesRouter from "./rules";
 import aiRouter from "./ai";
 import riskScoreRouter from "./riskScore";
+import { requireAuth } from "../middleware/auth.js";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(authRouter);
+router.use(requireAuth);
 router.use(companiesRouter);
 router.use(transactionsRouter);
 router.use(risksRouter);

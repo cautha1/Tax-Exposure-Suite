@@ -7,6 +7,7 @@ export const taxRiskFlagsTable = pgTable("tax_risk_flags", {
   companyId: uuid("company_id").notNull(),
   transactionId: uuid("transaction_id"),
   ruleCode: text("rule_code"),
+  issueTitle: text("issue_title"),
   riskType: text("risk_type"),
   description: text("description"),
   severity: text("severity"),

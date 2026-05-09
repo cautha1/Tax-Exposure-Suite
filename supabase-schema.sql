@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS public.uploads (
   file_name TEXT,
   row_count INTEGER,
   status TEXT DEFAULT 'pending',
+  uploaded_by UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -103,6 +104,7 @@ CREATE TABLE IF NOT EXISTS public.tax_risk_flags (
   company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
   transaction_id UUID REFERENCES public.transactions(id),
   rule_code TEXT,
+  issue_title TEXT,
   risk_type TEXT,
   description TEXT,
   severity TEXT,
@@ -139,6 +141,7 @@ CREATE TABLE IF NOT EXISTS public.reports (
   medium_risks INTEGER,
   low_risks INTEGER,
   summary TEXT,
+  created_by UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

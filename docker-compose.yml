@@ -1,0 +1,39 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: artifacts/api-server/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      TAXINTEL_DB_URL: ${TAXINTEL_DB_URL:?Set TAXINTEL_DB_URL in your local environment or .env file}
+      TAXINTEL_DB_KEY: ${TAXINTEL_DB_KEY:?Set TAXINTEL_DB_KEY in your local environment or .env file}
+      TAXINTEL_CORS_ORIGIN: ${TAXINTEL_CORS_ORIGIN:-http://localhost:3000}
+      TAXINTEL_SEED_DEMO_USERS: ${TAXINTEL_SEED_DEMO_USERS:-false}
+      TAXINTEL_DEMO_PASSWORD: ${TAXINTEL_DEMO_PASSWORD:-}
+    ports:
+      - "${API_PORT:-18080}:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/api/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  web:
+    build:
+      context: .
+      dockerfile: artifacts/tax-platform/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-3000}:80"

@@ -1,5 +1,10 @@
 import { Router, type IRouter } from "express";
 import { supabase, toCamel, sbErr } from "../lib/supabase.js";
+import {
+  currentUser,
+  requireCompanyAccess,
+  requireCompanyManager,
+} from "../lib/access.js";
 
 const router: IRouter = Router();
 
@@ -25,8 +30,12 @@ interface RuleConfig {
 }
 
 router.get("/rules", async (req, res) => {
+  const user = currentUser(req, res);
+  if (!user) return;
+
   try {
     const { companyId } = req.query as Record<string, string>;
+    if (companyId && !(await requireCompanyAccess(req, res, companyId))) return;
 
     let q = supabase.from("optional_rules_config").select("*").order("rule_code");
     if (companyId) q = q.or(`company_id.eq.${companyId},company_id.is.null`);
@@ -49,6 +58,14 @@ router.put("/rules/:ruleCode", async (req, res) => {
   try {
     const { ruleCode } = req.params;
     const { companyId, enabled, threshold } = req.body;
+    const user = currentUser(req, res);
+    if (!user) return;
+    if (companyId) {
+      if (!(await requireCompanyManager(req, res, companyId))) return;
+    } else if (user.role !== "admin") {
+      res.status(403).json({ error: "Only admins can update global rules" });
+      return;
+    }
 
     let q = supabase.from("optional_rules_config").select("*").eq("rule_code", ruleCode);
     if (companyId) q = q.eq("company_id", companyId);

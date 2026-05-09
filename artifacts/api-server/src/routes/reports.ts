@@ -1,5 +1,10 @@
 import { Router, type IRouter } from "express";
 import { supabase, toCamel, sbErr } from "../lib/supabase.js";
+import {
+  currentUser,
+  getVisibleCompanyIds,
+  requireCompanyAccess,
+} from "../lib/access.js";
 
 const router: IRouter = Router();
 
@@ -24,14 +29,32 @@ const fmtReport = (r: Report, companyName?: string) => ({
 });
 
 router.get("/reports", async (req, res) => {
+  const user = currentUser(req, res);
+  if (!user) return;
+
   try {
     const { companyId } = req.query as Record<string, string>;
     let q = supabase.from("reports").select("*").order("created_at", { ascending: false });
-    if (companyId) q = q.eq("company_id", companyId);
+    if (companyId) {
+      if (!(await requireCompanyAccess(req, res, companyId))) return;
+      q = q.eq("company_id", companyId);
+    } else {
+      const visibleCompanyIds = await getVisibleCompanyIds(user);
+      if (visibleCompanyIds && visibleCompanyIds.length === 0) {
+        res.json([]);
+        return;
+      }
+      if (visibleCompanyIds) q = q.in("company_id", visibleCompanyIds);
+    }
     const { data: rows, error } = await q;
     sbErr(error, "list reports");
 
-    const { data: companiesRaw } = await supabase.from("companies").select("id, company_name");
+    let companiesQ = supabase.from("companies").select("id, company_name");
+    const visibleCompanyIds = await getVisibleCompanyIds(user);
+    if (visibleCompanyIds && visibleCompanyIds.length > 0) {
+      companiesQ = companiesQ.in("id", visibleCompanyIds);
+    }
+    const { data: companiesRaw } = await companiesQ;
     const companyMap: Record<string, string> = Object.fromEntries(
       (companiesRaw ?? []).map((c: Record<string, unknown>) => [c.id, c.company_name])
     );
@@ -46,6 +69,8 @@ router.post("/reports", async (req, res) => {
   try {
     const { companyId, title } = req.body;
     if (!companyId) { res.status(400).json({ error: "companyId required" }); return; }
+    const user = await requireCompanyAccess(req, res, companyId);
+    if (!user) return;
 
     const { data: companyRaw, error: coErr } = await supabase.from("companies").select("*").eq("id", companyId).single();
     if (coErr || !companyRaw) { res.status(404).json({ error: "Company not found" }); return; }
@@ -65,6 +90,7 @@ router.post("/reports", async (req, res) => {
     const { data, error } = await supabase.from("reports").insert({
       company_id: companyId, title: reportTitle, status: "ready", summary,
       total_exposure: totalExposure, high_risks: highRisks, medium_risks: mediumRisks, low_risks: lowRisks,
+      created_by: user.id,
     }).select().single();
     sbErr(error, "insert report");
     res.status(201).json(fmtReport(toCamel<Report>(data), company.companyName));
@@ -76,6 +102,7 @@ router.get("/reports/:id", async (req, res) => {
     const { data: raw, error } = await supabase.from("reports").select("*").eq("id", req.params.id).single();
     if (error || !raw) { res.status(404).json({ error: "Not found" }); return; }
     const row = toCamel<Report>(raw);
+    if (!(await requireCompanyAccess(req, res, row.companyId))) return;
     const { data: coRaw } = await supabase.from("companies").select("company_name").eq("id", row.companyId).single();
     res.json(fmtReport(row, (coRaw as Record<string, unknown>)?.company_name as string | undefined));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }

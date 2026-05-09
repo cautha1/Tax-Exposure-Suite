@@ -1,13 +1,31 @@
 import { Router, type IRouter } from "express";
 import { supabase, toCamel, sbErr } from "../lib/supabase.js";
+import {
+  currentUser,
+  getVisibleCompanyIds,
+  requireCompanyAccess,
+} from "../lib/access.js";
 
 const router: IRouter = Router();
 
 router.get("/uploads", async (req, res) => {
+  const user = currentUser(req, res);
+  if (!user) return;
+
   try {
     const { companyId } = req.query as Record<string, string>;
     let q = supabase.from("uploads").select("*").order("created_at", { ascending: false });
-    if (companyId) q = q.eq("company_id", companyId);
+    if (companyId) {
+      if (!(await requireCompanyAccess(req, res, companyId))) return;
+      q = q.eq("company_id", companyId);
+    } else {
+      const visibleCompanyIds = await getVisibleCompanyIds(user);
+      if (visibleCompanyIds && visibleCompanyIds.length === 0) {
+        res.json([]);
+        return;
+      }
+      if (visibleCompanyIds) q = q.in("company_id", visibleCompanyIds);
+    }
     const { data, error } = await q;
     sbErr(error, "list uploads");
     res.json((data ?? []).map((u: unknown) => {

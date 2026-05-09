@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { supabase, toCamel, sbErr } from "../lib/supabase.js";
+import { requireCompanyManager } from "../lib/access.js";
 
 const router: IRouter = Router();
 
@@ -58,7 +59,7 @@ function makeFlag(
   confidence: Confidence
 ): Flag {
   const issue_title = RULE_TITLES[base.rule_code] ?? base.category;
-  return { ...base, issue_title, risk_type: "VAT", confidence, risk_score: computeRiskScore(base.severity, base.estimated_exposure, confidence) };
+  return { ...base, issue_title, risk_type: base.category, confidence, risk_score: computeRiskScore(base.severity, base.estimated_exposure, confidence) };
 }
 
 function runVatRules(tx: Transaction, rules: Set<string>, thresholds: Record<string, number>): Flag[] {
@@ -165,6 +166,7 @@ router.post("/analysis/run", async (req, res) => {
   try {
     const { companyId, clearExisting = true } = req.body;
     if (!companyId) { res.status(400).json({ error: "companyId required" }); return; }
+    if (!(await requireCompanyManager(req, res, companyId))) return;
 
     const { data: companyRaw, error: coErr } = await supabase.from("companies").select("*").eq("id", companyId).single();
     if (coErr || !companyRaw) { res.status(404).json({ error: "Company not found" }); return; }
@@ -200,8 +202,7 @@ router.post("/analysis/run", async (req, res) => {
     }
 
     if (allFlags.length > 0) {
-      const dbFlags = allFlags.map(({ confidence, ...rest }) => rest);
-      const { error: flagErr } = await supabase.from("tax_risk_flags").insert(dbFlags);
+      const { error: flagErr } = await supabase.from("tax_risk_flags").insert(allFlags);
       sbErr(flagErr, "insert flags");
     }
 

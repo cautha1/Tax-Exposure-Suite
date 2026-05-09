@@ -1,5 +1,12 @@
 import { Router, type IRouter } from "express";
 import { supabase, toCamel, sbErr } from "../lib/supabase.js";
+import {
+  canCreateCompany,
+  currentUser,
+  getVisibleCompanyIds,
+  requireCompanyAccess,
+  requireCompanyManager,
+} from "../lib/access.js";
 
 const router: IRouter = Router();
 
@@ -18,19 +25,66 @@ interface Company {
   createdAt: string;
 }
 
+interface RiskSummaryRow {
+  status: string | null;
+  severity: string | null;
+  category: string | null;
+  estimatedExposure: string | number | null;
+  createdAt: string | null;
+}
+
 const fmt = (c: Company) => ({
-  id: c.id, companyName: c.companyName, tinOrTaxId: c.tinOrTaxId ?? null,
-  industry: c.industry ?? null, country: c.country ?? null, financialYear: c.financialYear ?? null,
-  riskLevel: c.riskLevel ?? null, riskScore: c.riskScore != null ? Number(c.riskScore) : null,
-  transactionCount: c.transactionCount ?? null, openFlagsCount: c.openFlagsCount ?? null,
-  estimatedExposure: c.estimatedExposure != null ? Number(c.estimatedExposure) : null,
+  id: c.id,
+  companyName: c.companyName,
+  tinOrTaxId: c.tinOrTaxId ?? null,
+  industry: c.industry ?? null,
+  country: c.country ?? null,
+  financialYear: c.financialYear ?? null,
+  riskLevel: c.riskLevel ?? null,
+  riskScore: c.riskScore != null ? Number(c.riskScore) : null,
+  transactionCount: c.transactionCount ?? null,
+  openFlagsCount: c.openFlagsCount ?? null,
+  estimatedExposure:
+    c.estimatedExposure != null ? Number(c.estimatedExposure) : null,
   createdAt: c.createdAt,
 });
 
+function monthlyExposureSeries(risks: RiskSummaryRow[]) {
+  const now = new Date();
+  const buckets = Array.from({ length: now.getMonth() + 1 }, () => 0);
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  for (const risk of risks) {
+    if (!risk.createdAt) continue;
+    const createdAt = new Date(risk.createdAt);
+    if (
+      Number.isNaN(createdAt.getTime()) ||
+      createdAt.getFullYear() !== now.getFullYear()
+    ) continue;
+
+    buckets[createdAt.getMonth()] += Number(risk.estimatedExposure ?? 0);
+  }
+
+  return buckets.map((exposure, index) => ({
+    month: monthNames[index],
+    exposure: Math.round(exposure),
+  }));
+}
+
 router.get("/companies", async (req, res) => {
+  const user = currentUser(req, res);
+  if (!user) return;
+
   try {
     const { search, industry, riskLevel } = req.query as Record<string, string>;
+    const visibleCompanyIds = await getVisibleCompanyIds(user);
+    if (visibleCompanyIds && visibleCompanyIds.length === 0) {
+      res.json([]);
+      return;
+    }
+
     let q = supabase.from("companies").select("*").order("company_name");
+    if (visibleCompanyIds) q = q.in("id", visibleCompanyIds);
     if (industry) q = q.eq("industry", industry);
     if (riskLevel) q = q.eq("risk_level", riskLevel);
     if (search) q = q.ilike("company_name", `%${search}%`);
@@ -41,8 +95,14 @@ router.get("/companies", async (req, res) => {
 });
 
 router.post("/companies", async (req, res) => {
+  const user = currentUser(req, res);
+  if (!user) return;
+  if (!canCreateCompany(user)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
   try {
-    const userId = req.headers["x-user-id"] as string;
     const { companyName, tinOrTaxId, industry, country, financialYear, assignedAdvisorId } = req.body;
     if (!companyName) { res.status(400).json({ error: "companyName is required" }); return; }
 
@@ -54,15 +114,18 @@ router.post("/companies", async (req, res) => {
     sbErr(error, "insert company");
     const row = toCamel<Company>(data);
 
-    if (assignedAdvisorId) {
-      await supabase.from("company_users").insert({
-        company_id: row.id, user_id: assignedAdvisorId, role: "advisor", assigned_by: userId ?? null,
-      });
-    }
-    if (userId && userId !== assignedAdvisorId) {
-      await supabase.from("company_users").insert({
-        company_id: row.id, user_id: userId, role: "owner", assigned_by: userId,
-      });
+    const advisorId = user.role === "admin" && assignedAdvisorId
+      ? assignedAdvisorId
+      : user.id;
+
+    await supabase.from("company_users").upsert({
+      company_id: row.id, user_id: advisorId, role: "advisor", assigned_by: user.id,
+    }, { onConflict: "company_id,user_id" });
+
+    if (user.id !== advisorId) {
+      await supabase.from("company_users").upsert({
+        company_id: row.id, user_id: user.id, role: "owner", assigned_by: user.id,
+      }, { onConflict: "company_id,user_id" });
     }
 
     res.status(201).json(fmt(row));
@@ -70,6 +133,8 @@ router.post("/companies", async (req, res) => {
 });
 
 router.get("/companies/:id", async (req, res) => {
+  if (!(await requireCompanyAccess(req, res, req.params.id))) return;
+
   try {
     const { data, error } = await supabase.from("companies").select("*").eq("id", req.params.id).single();
     if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
@@ -78,9 +143,15 @@ router.get("/companies/:id", async (req, res) => {
 });
 
 router.put("/companies/:id", async (req, res) => {
+  const user = await requireCompanyManager(req, res, req.params.id);
+  if (!user) return;
+
   try {
     const { companyName, tinOrTaxId, industry, country, financialYear, assignedAdvisorId } = req.body;
-    const userId = req.headers["x-user-id"] as string;
+    if (assignedAdvisorId && user.role !== "admin") {
+      res.status(403).json({ error: "Only admins can assign advisors" });
+      return;
+    }
 
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (companyName !== undefined) updates.company_name = companyName;
@@ -95,7 +166,7 @@ router.put("/companies/:id", async (req, res) => {
 
     if (assignedAdvisorId) {
       await supabase.from("company_users").upsert({
-        company_id: row.id, user_id: assignedAdvisorId, role: "advisor", assigned_by: userId ?? null,
+        company_id: row.id, user_id: assignedAdvisorId, role: "advisor", assigned_by: user.id,
       }, { onConflict: "company_id,user_id" });
     }
 
@@ -104,13 +175,14 @@ router.put("/companies/:id", async (req, res) => {
 });
 
 router.get("/companies/:id/users", async (req, res) => {
+  if (!(await requireCompanyManager(req, res, req.params.id))) return;
+
   try {
     const { data: assignments, error } = await supabase.from("company_users").select("*").eq("company_id", req.params.id);
     sbErr(error, "list company users");
     const userIds = (assignments ?? []).map((a: Record<string, unknown>) => a.user_id as string);
     if (userIds.length === 0) { res.json([]); return; }
 
-    // Look up users from Supabase Auth (no profiles table dependency)
     const profileMap: Record<string, { id: string; email: string | null; fullName: string | null; role: string }> = {};
     for (const uid of userIds) {
       const { data: { user } } = await supabase.auth.admin.getUserById(uid);
@@ -131,29 +203,34 @@ router.get("/companies/:id/users", async (req, res) => {
 });
 
 router.post("/companies/:id/users", async (req, res) => {
+  const user = await requireCompanyManager(req, res, req.params.id);
+  if (!user) return;
+
   try {
-    const userId = req.headers["x-user-id"] as string;
     const { userId: targetUserId, role = "member" } = req.body;
     if (!targetUserId) { res.status(400).json({ error: "userId required" }); return; }
     const { data, error } = await supabase.from("company_users").upsert({
-      company_id: req.params.id, user_id: targetUserId, role, assigned_by: userId ?? null,
+      company_id: req.params.id, user_id: targetUserId, role, assigned_by: user.id,
     }, { onConflict: "company_id,user_id" }).select().single();
-    if (error) { res.status(201).json({ message: "User already assigned" }); return; }
+    sbErr(error, "assign company user");
     res.status(201).json(toCamel(data));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 router.get("/companies/:id/summary", async (req, res) => {
+  if (!(await requireCompanyAccess(req, res, req.params.id))) return;
+
   try {
     const { id } = req.params;
     const { data: companyRaw, error } = await supabase.from("companies").select("*").eq("id", id).single();
     if (error || !companyRaw) { res.status(404).json({ error: "Not found" }); return; }
     const company = toCamel<Company>(companyRaw);
 
-    const { data: risksRaw } = await supabase.from("tax_risk_flags").select("status, severity, category, estimated_exposure").eq("company_id", id);
-    const risks = (risksRaw ?? []).map((r: unknown) => toCamel<{
-      status: string; severity: string; category: string; estimatedExposure: string | number;
-    }>(r));
+    const { data: risksRaw } = await supabase
+      .from("tax_risk_flags")
+      .select("status, severity, category, estimated_exposure, created_at")
+      .eq("company_id", id);
+    const risks = (risksRaw ?? []).map((r: unknown) => toCamel<RiskSummaryRow>(r));
 
     const openRisks = risks.filter(r => r.status === "open");
     const estimatedExposure = openRisks.reduce((s, r) => s + Number(r.estimatedExposure ?? 0), 0);
@@ -167,13 +244,12 @@ router.get("/companies/:id/summary", async (req, res) => {
       const sev = r.severity ?? "low";
       sevMap[sev] = (sevMap[sev] ?? 0) + 1;
     }
-    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     res.json({
       totalTransactions: company.transactionCount ?? 0,
       openRisks: openRisks.length, estimatedExposure, riskScore, riskLevel: company.riskLevel ?? "low",
       risksByCategory: Object.entries(catMap).map(([category, v]) => ({ category, count: v.count, exposure: Math.round(v.exposure) })),
       severityBreakdown: Object.entries(sevMap).map(([severity, count]) => ({ severity, count })),
-      monthlyExposure: months.map(m => ({ month: m, exposure: Math.round(Math.random() * 50000) })),
+      monthlyExposure: monthlyExposureSeries(openRisks),
     });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });

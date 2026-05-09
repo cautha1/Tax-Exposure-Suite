@@ -18,7 +18,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   };
-  if (session?.id) headers["x-user-id"] = session.id;
+  if (session?.accessToken) {
+    headers.Authorization = `Bearer ${session.accessToken}`;
+  }
 
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
   if (!res.ok) {

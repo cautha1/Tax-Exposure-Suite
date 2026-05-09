@@ -1,17 +1,15 @@
 -- Tax Exposure Intelligence Platform - Supabase Migration
--- Run this in your Supabase SQL Editor at: https://supabase.com/dashboard/project/wqkcnnstnrhbttcnhvne/sql
+-- Run this in your Supabase SQL Editor for the target project.
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Profiles table (users with custom auth)
+-- Profiles table (optional metadata; authentication is Supabase Auth)
 CREATE TABLE IF NOT EXISTS profiles (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  email TEXT NOT NULL UNIQUE,
-  full_name TEXT NOT NULL,
+  id UUID PRIMARY KEY,
+  email TEXT,
+  full_name TEXT,
   role TEXT NOT NULL DEFAULT 'advisor',
-  password_hash TEXT NOT NULL,
-  company_id UUID,
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
@@ -71,11 +69,21 @@ CREATE TABLE IF NOT EXISTS tax_risk_flags (
   company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
   transaction_id UUID REFERENCES transactions(id),
   rule_code TEXT,
+  issue_title TEXT,
+  risk_type TEXT,
   description TEXT,
   severity TEXT,
   estimated_exposure NUMERIC,
   status TEXT DEFAULT 'open',
   category TEXT,
+  confidence TEXT,
+  risk_score NUMERIC,
+  reviewed_at TIMESTAMPTZ,
+  reviewed_by UUID,
+  review_notes TEXT,
+  resolved_by UUID,
+  resolved_at TIMESTAMPTZ,
+  internal_note TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
@@ -160,9 +168,6 @@ VALUES
   ('11111111-1111-1111-1111-111111111111', 'Tax Exposure Report - Meridian Holdings Ltd - Q1 2024', 'ready', 'Analysis identified 4 open tax risk flags with estimated total exposure of $113,500. High: 2, Medium: 2, Low: 0.', 113500, 2, 2, 0),
   ('44444444-4444-4444-4444-444444444444', 'Tax Exposure Report - Global Trade Partners - FY2024', 'ready', 'Analysis identified 5 open tax risk flags with estimated total exposure of $252,000. High: 3, Medium: 2, Low: 0.', 252000, 3, 2, 0);
 
--- Seed demo user accounts (password is "demo1234" for both)
-INSERT INTO profiles (id, email, full_name, role, password_hash, company_id)
-VALUES
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'admin@taxintel.com', 'Alex Chen', 'admin', '$2b$10$nj2PCrNq8mmzfecfh7tXL.kJg3iecim8vWFEAtpg2ml0DM.CiCSBC', null),
-  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'advisor@taxintel.com', 'Sarah Williams', 'advisor', '$2b$10$4A16atz/.vrGHsjrs0a0DuEjx96KDFFLlhZikwgAaQYrWre8b5fNG', null)
-ON CONFLICT (email) DO NOTHING;
+-- Demo users are intentionally not seeded here.
+-- Create users through Supabase Auth, or enable TAXINTEL_SEED_DEMO_USERS
+-- in a local API environment with a strong TAXINTEL_DEMO_PASSWORD.

@@ -1,5 +1,11 @@
 import { Router, type IRouter } from "express";
 import { supabase, toCamel, sbErr } from "../lib/supabase.js";
+import {
+  currentUser,
+  emptyPaginated,
+  getVisibleCompanyIds,
+  requireCompanyAccess,
+} from "../lib/access.js";
 
 const router: IRouter = Router();
 
@@ -32,6 +38,9 @@ const SORTABLE_COLS: Record<string, string> = {
 };
 
 router.get("/transactions", async (req, res) => {
+  const user = currentUser(req, res);
+  if (!user) return;
+
   try {
     const {
       companyId, uploadId, search, taxType, transactionType,
@@ -47,7 +56,17 @@ router.get("/transactions", async (req, res) => {
     const ascending = sortDir === "asc";
 
     let q = supabase.from("transactions").select("*", { count: "exact" });
-    if (companyId) q = q.eq("company_id", companyId);
+    if (companyId) {
+      if (!(await requireCompanyAccess(req, res, companyId))) return;
+      q = q.eq("company_id", companyId);
+    } else {
+      const visibleCompanyIds = await getVisibleCompanyIds(user);
+      if (visibleCompanyIds && visibleCompanyIds.length === 0) {
+        res.json(emptyPaginated(pageNum, limitNum));
+        return;
+      }
+      if (visibleCompanyIds) q = q.in("company_id", visibleCompanyIds);
+    }
     if (uploadId) q = q.eq("upload_id", uploadId);
     if (taxType === "NONE") q = q.is("tax_type", null);
     else if (taxType) q = q.eq("tax_type", taxType);
@@ -74,6 +93,8 @@ router.post("/transactions/upload", async (req, res) => {
       res.status(400).json({ error: "companyId and transactions array required" });
       return;
     }
+    const user = await requireCompanyAccess(req, res, companyId);
+    if (!user) return;
     if (transactions.length === 0) {
       res.status(400).json({ error: "No transactions provided" });
       return;
@@ -101,6 +122,7 @@ router.post("/transactions/upload", async (req, res) => {
     const { data: uploadData, error: uploadErr } = await supabase.from("uploads").insert({
       company_id: companyId, file_name: fileName ?? "upload.csv",
       row_count: validRows.length, status: validRows.length > 0 ? "completed" : "failed",
+      uploaded_by: user.id,
     }).select().single();
     sbErr(uploadErr, "create upload");
     const upload = toCamel<{ id: string }>(uploadData);
@@ -144,10 +166,10 @@ router.post("/transactions/upload", async (req, res) => {
           newFlags.push({ company_id: companyId, rule_code: "VAT-001", issue_title: "Missing VAT on Taxable Transaction", risk_type: "VAT", description: `Zero VAT on taxable transaction (Uganda rate 18%): ${t.description ?? t.reference ?? "Unknown"}`, severity: "high", estimated_exposure: amt * 0.18, status: "open", category: "VAT" });
         }
         if (t.tax_type === "WHT" && wht === 0 && amt > 0) {
-          newFlags.push({ company_id: companyId, rule_code: "WHT-001", issue_title: "WHT Not Deducted (15%)", risk_type: "VAT", description: `Missing WHT on WHT-type transaction (Uganda rate 15%): ${t.description ?? "Unknown"}`, severity: "high", estimated_exposure: amt * 0.15, status: "open", category: "Withholding Tax" });
+          newFlags.push({ company_id: companyId, rule_code: "WHT-001", issue_title: "WHT Not Deducted (15%)", risk_type: "Withholding Tax", description: `Missing WHT on WHT-type transaction (Uganda rate 15%): ${t.description ?? "Unknown"}`, severity: "high", estimated_exposure: amt * 0.15, status: "open", category: "Withholding Tax" });
         }
         if (isService && wht === 0 && amt > 500000) {
-          newFlags.push({ company_id: companyId, rule_code: "WHT-002", issue_title: "WHT Not Deducted on Service Payment", risk_type: "VAT", description: `Service payment with no WHT deducted (Uganda WHT 15%): ${t.vendor_name ?? t.description ?? "Unknown"} (UGX ${amt.toLocaleString()})`, severity: "high", estimated_exposure: amt * 0.15, status: "open", category: "Withholding Tax" });
+          newFlags.push({ company_id: companyId, rule_code: "WHT-002", issue_title: "WHT Not Deducted on Service Payment", risk_type: "Withholding Tax", description: `Service payment with no WHT deducted (Uganda WHT 15%): ${t.vendor_name ?? t.description ?? "Unknown"} (UGX ${amt.toLocaleString()})`, severity: "high", estimated_exposure: amt * 0.15, status: "open", category: "Withholding Tax" });
         }
       }
 
