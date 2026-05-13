@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import type { User } from "@supabase/supabase-js";
-import { supabase } from "../lib/supabase.js";
+import { supabaseAuth } from "../lib/supabase.js";
 
 export type ProfileRole = "admin" | "advisor" | "client_user";
 
@@ -75,7 +75,7 @@ export async function requireAuth(
     const {
       data: { user },
       error,
-    } = await supabase.auth.getUser(token);
+    } = await supabaseAuth.auth.getUser(token);
 
     if (error || !user) {
       res.status(401).json({ error: "Unauthorized" });

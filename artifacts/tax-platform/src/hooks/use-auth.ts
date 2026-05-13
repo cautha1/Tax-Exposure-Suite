@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { api } from "../lib/api";
+import { api, AUTH_EXPIRED_EVENT, SESSION_KEY } from "../lib/api";
 
 export interface AuthUser {
   id: string;
@@ -23,8 +23,6 @@ export interface AuthResponse {
   refreshToken: string | null;
   expiresAt: number | null;
 }
-
-const SESSION_KEY = "tax_platform_session";
 
 function readStoredSession(): AuthResponse | null {
   const stored = localStorage.getItem(SESSION_KEY);
@@ -51,14 +49,43 @@ export function useAuth() {
     isLoading: true,
   });
 
+  const clearSession = () => {
+    localStorage.removeItem(SESSION_KEY);
+    setSession({ user: null, isAuthenticated: false, isLoading: false });
+  };
+
   useEffect(() => {
+    let cancelled = false;
+
+    const expireSession = () => {
+      if (cancelled) return;
+      clearSession();
+      setLocation("/login");
+    };
+
+    window.addEventListener(AUTH_EXPIRED_EVENT, expireSession);
+
     const stored = readStoredSession();
     if (stored) {
-      setSession({ user: stored.user, isAuthenticated: true, isLoading: false });
+      api.get<AuthUser>("/auth/me")
+        .then(user => {
+          if (cancelled) return;
+          const refreshed = { ...stored, user };
+          localStorage.setItem(SESSION_KEY, JSON.stringify(refreshed));
+          setSession({ user, isAuthenticated: true, isLoading: false });
+        })
+        .catch(() => {
+          if (!cancelled) expireSession();
+        });
     } else {
       setSession({ user: null, isAuthenticated: false, isLoading: false });
     }
-  }, []);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener(AUTH_EXPIRED_EVENT, expireSession);
+    };
+  }, [setLocation]);
 
   const login = async (email: string, password: string): Promise<void> => {
     const auth = await api.post<AuthResponse>("/auth/login", { email, password });
@@ -93,7 +120,7 @@ export function useAuth() {
       // ignore errors on logout
     }
     localStorage.removeItem(SESSION_KEY);
-    setSession({ user: null, isAuthenticated: false, isLoading: false });
+    clearSession();
     setLocation("/login");
   };
 

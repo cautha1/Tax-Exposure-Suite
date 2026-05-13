@@ -7,6 +7,7 @@ import {
   getVisibleCompanyIds,
   requireCompanyAccess,
 } from "../lib/access.js";
+import { writeAuditLog } from "../lib/audit.js";
 
 const router: IRouter = Router();
 
@@ -14,7 +15,8 @@ interface RiskFlag {
   id: string; companyId: string; transactionId: string | null; ruleCode: string | null;
   issueTitle: string | null; riskType: string | null; description: string | null; severity: string | null;
   estimatedExposure: string | number | null; status: string | null; category: string | null;
-  riskScore: string | number | null; createdAt: string;
+  riskScore: string | number | null; detectionMethod: string | null; legalReference: string | null;
+  evidence: Record<string, unknown> | null; createdAt: string;
 }
 
 const fmtRisk = (r: RiskFlag, companyName?: string, transaction?: Record<string, unknown>) => ({
@@ -24,6 +26,9 @@ const fmtRisk = (r: RiskFlag, companyName?: string, transaction?: Record<string,
   severity: r.severity ?? null, estimatedExposure: r.estimatedExposure != null ? Number(r.estimatedExposure) : null,
   status: r.status ?? null, category: r.category ?? null,
   riskScore: r.riskScore != null ? Number(r.riskScore) : null,
+  detectionMethod: r.detectionMethod ?? null,
+  legalReference: r.legalReference ?? null,
+  evidence: r.evidence ?? null,
   companyName: companyName ?? null, transaction: transaction ?? null, createdAt: r.createdAt,
 });
 
@@ -162,6 +167,13 @@ router.post("/risks/:id/review", async (req, res) => {
       updated_at: new Date().toISOString(),
     }).eq("id", req.params.id).select().single();
     if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    await writeAuditLog(req, {
+      action: "risk.reviewed",
+      entityType: "tax_risk_flag",
+      entityId: req.params.id,
+      companyId: existing.companyId,
+      metadata: { hasNote: typeof note === "string" && note.length > 0 },
+    });
     res.json({ success: true, risk: fmtRisk(toCamel<RiskFlag>(data)) });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
@@ -193,6 +205,55 @@ router.post("/risks/:id/resolve", async (req, res) => {
         updated_at: new Date().toISOString(),
       }).eq("id", risk.companyId);
     }
+    await writeAuditLog(req, {
+      action: "risk.resolved",
+      entityType: "tax_risk_flag",
+      entityId: req.params.id,
+      companyId: existing.companyId,
+      metadata: { hasNote: typeof note === "string" && note.length > 0 },
+    });
+    res.json({ success: true, risk: fmtRisk(risk) });
+  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
+});
+
+router.post("/risks/:id/reopen", async (req, res) => {
+  try {
+    const { note } = req.body ?? {};
+    const { data: raw, error: fetchErr } = await supabase.from("tax_risk_flags").select("*").eq("id", req.params.id).single();
+    if (fetchErr || !raw) { res.status(404).json({ error: "Not found" }); return; }
+    const existing = toCamel<RiskFlag>(raw);
+    const user = await requireCompanyAccess(req, res, existing.companyId);
+    if (!user) return;
+
+    const { data, error } = await supabase.from("tax_risk_flags").update({
+      status: "open",
+      resolved_at: null,
+      resolved_by: null,
+      reviewed_at: null,
+      reviewed_by: null,
+      review_notes: typeof note === "string" ? note : null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", req.params.id).select().single();
+    if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    const risk = toCamel<RiskFlag>(data);
+
+    const { count: openCount } = await supabase
+      .from("tax_risk_flags")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", risk.companyId)
+      .eq("status", "open");
+    await supabase.from("companies").update({
+      open_flags_count: openCount ?? 0,
+      updated_at: new Date().toISOString(),
+    }).eq("id", risk.companyId);
+
+    await writeAuditLog(req, {
+      action: "risk.reopened",
+      entityType: "tax_risk_flag",
+      entityId: req.params.id,
+      companyId: existing.companyId,
+      metadata: { hasNote: typeof note === "string" && note.length > 0 },
+    });
     res.json({ success: true, risk: fmtRisk(risk) });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
@@ -211,6 +272,13 @@ router.patch("/risks/:id/note", async (req, res) => {
       updated_at: new Date().toISOString(),
     }).eq("id", req.params.id).select().single();
     if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    await writeAuditLog(req, {
+      action: "risk.note_updated",
+      entityType: "tax_risk_flag",
+      entityId: req.params.id,
+      companyId: existing.companyId,
+      metadata: { noteLength: note.length },
+    });
     res.json({ success: true, risk: fmtRisk(toCamel<RiskFlag>(data)) });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });

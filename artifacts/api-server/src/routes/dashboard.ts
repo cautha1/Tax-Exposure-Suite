@@ -65,6 +65,9 @@ function emptyAdvisorDashboard() {
     recentAlerts: [],
     recentUploads: [],
     highRiskCompanies: [],
+    workflowCounts: { open: 0, reviewed: 0, resolved: 0 },
+    recentActivity: [],
+    reviewBacklog: [],
   };
 }
 
@@ -230,35 +233,40 @@ router.get("/dashboard/advisor", async (req, res) => {
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
     let companiesQ = supabase.from("companies").select("*").order("updated_at", { ascending: false });
-    let flagsQ = supabase.from("tax_risk_flags").select("*").eq("status", "open");
+    let flagsQ = supabase.from("tax_risk_flags").select("*");
     let txQ = supabase.from("transactions").select("id", { count: "exact", head: true });
     let uploadsQ = supabase.from("uploads").select("*").gte("created_at", sevenDaysAgo.toISOString()).order("created_at", { ascending: false }).limit(10);
+    let activityQ = supabase.from("activity_logs").select("*").order("created_at", { ascending: false }).limit(10);
 
     if (visibleCompanyIds) {
       companiesQ = companiesQ.in("id", visibleCompanyIds);
       flagsQ = flagsQ.in("company_id", visibleCompanyIds);
       txQ = txQ.in("company_id", visibleCompanyIds);
       uploadsQ = uploadsQ.in("company_id", visibleCompanyIds);
+      activityQ = activityQ.in("company_id", visibleCompanyIds);
     }
 
-    const [companiesRes, flagsRes, txRes, uploadsRes] = await Promise.all([
+    const [companiesRes, flagsRes, txRes, uploadsRes, activityRes] = await Promise.all([
       companiesQ,
       flagsQ,
       txQ,
       uploadsQ,
+      activityQ,
     ]);
 
     interface CompanyRow { id: string; companyName: string; riskLevel: string; riskScore: string; openFlagsCount: number; estimatedExposure: string; }
-    interface FlagRow { id: string; companyId: string; description: string; severity: string; category: string; estimatedExposure: string; createdAt: string; }
+    interface FlagRow { id: string; companyId: string; description: string; severity: string; category: string; estimatedExposure: string; status: string; createdAt: string; }
+    interface ActivityRow { id: string; companyId: string | null; action: string; entityType: string; entityId: string | null; metadata: Record<string, unknown>; createdAt: string; }
 
     const allCompanies = (companiesRes.data ?? []).map((c: unknown) => toCamel<CompanyRow>(c));
     const allFlags = (flagsRes.data ?? []).map((f: unknown) => toCamel<FlagRow>(f));
+    const openFlags = allFlags.filter(f => f.status === "open");
 
-    const estimatedExposure = allFlags.reduce((s, r) => s + Number(r.estimatedExposure ?? 0), 0);
+    const estimatedExposure = openFlags.reduce((s, r) => s + Number(r.estimatedExposure ?? 0), 0);
     const highRisk = allCompanies.filter(c => c.riskLevel === "high" || c.riskLevel === "critical");
     const companyMap = Object.fromEntries(allCompanies.map(c => [c.id, c.companyName]));
 
-    const recentAlerts = allFlags
+    const recentAlerts = openFlags
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 10)
       .map(r => ({ id: r.id, companyId: r.companyId, companyName: companyMap[r.companyId] ?? null, description: r.description, severity: r.severity, category: r.category, createdAt: r.createdAt }));
@@ -266,7 +274,7 @@ router.get("/dashboard/advisor", async (req, res) => {
     res.json({
       totalClients: allCompanies.length,
       totalTransactions: txRes.count ?? 0,
-      totalOpenFlags: allFlags.length,
+      totalOpenFlags: openFlags.length,
       estimatedExposure,
       highRiskClients: highRisk.length,
       riskDistribution: {
@@ -277,6 +285,20 @@ router.get("/dashboard/advisor", async (req, res) => {
       },
       recentAlerts,
       recentUploads: (uploadsRes.data ?? []).map((u: unknown) => toCamel(u)),
+      workflowCounts: {
+        open: openFlags.length,
+        reviewed: allFlags.filter(f => f.status === "reviewed").length,
+        resolved: allFlags.filter(f => f.status === "resolved").length,
+      },
+      reviewBacklog: allFlags
+        .filter(f => f.status === "reviewed")
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        .slice(0, 5)
+        .map(r => ({ id: r.id, companyId: r.companyId, companyName: companyMap[r.companyId] ?? null, description: r.description, severity: r.severity, category: r.category, createdAt: r.createdAt })),
+      recentActivity: (activityRes.data ?? []).map((a: unknown) => {
+        const row = toCamel<ActivityRow>(a);
+        return { ...row, companyName: row.companyId ? companyMap[row.companyId] ?? null : null };
+      }),
       highRiskCompanies: highRisk.slice(0, 5).map(c => ({
         id: c.id, companyName: c.companyName, riskScore: c.riskScore ? Number(c.riskScore) : 0,
         openFlagsCount: c.openFlagsCount ?? 0, estimatedExposure: c.estimatedExposure ? Number(c.estimatedExposure) : 0,

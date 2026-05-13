@@ -12,9 +12,10 @@ import {
   ShieldAlert,
   Building2,
   ChevronRight,
-  Sparkles,
+  ChevronDown,
   PanelLeftClose,
   PanelLeftOpen,
+  UserCircle,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ const NAV_ITEMS = [
   { href: "/transactions", label: "Transactions", icon: FileSpreadsheet },
   { href: "/risks", label: "Tax Risks", icon: ShieldAlert },
   { href: "/reports", label: "Reports", icon: FileText },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 function getInitials(name?: string) {
@@ -193,6 +195,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const isDesktop = useIsDesktop();
 
   const [mode, setMode] = useState<"light" | "dark">("light");
@@ -344,104 +347,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 className="flex-1 overflow-y-auto px-3 py-4 hide-scrollbar"
                 style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
               >
-                <div
-                  className={`mb-6 overflow-hidden rounded-3xl border bg-gradient-to-br shadow-sm ${
-                    collapsed ? "p-3" : "p-4"
-                  } ${theme.profileCard}`}
-                >
-                  <div
-                    className={`flex ${
-                      collapsed
-                        ? "flex-col items-center justify-center gap-3"
-                        : "items-start justify-between gap-3"
-                    }`}
-                  >
-                    <div
-                      className={`flex min-w-0 ${
-                        collapsed
-                          ? "flex-col items-center gap-3"
-                          : "items-center gap-3"
-                      }`}
-                    >
-                      <div className="relative shrink-0">
-                        <div
-                          className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${theme.avatar} text-sm font-semibold text-white shadow-md`}
-                        >
-                          {initials}
-                        </div>
-                        <span
-                          className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 bg-emerald-400 ${
-                            mode === "dark"
-                              ? "border-slate-900"
-                              : "border-white"
-                          }`}
-                        />
-                      </div>
-
-                      {!collapsed && (
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold tracking-tight">
-                            {user?.fullName || "TaxIntel User"}
-                          </p>
-                          <p
-                            className={`mt-0.5 truncate text-xs capitalize ${theme.profileTextMuted}`}
-                          >
-                            {user?.role || "user"}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    {!collapsed && (
-                      <div
-                        className={`rounded-full border px-2 py-1 text-[10px] font-medium uppercase tracking-[0.12em] ${theme.profileSubtle}`}
-                      >
-                        Active
-                      </div>
-                    )}
-                  </div>
-
-                  {!collapsed && (
-                    <>
-                      <div
-                        className={`mt-4 rounded-2xl border p-3 backdrop-blur ${theme.profileSubtle}`}
-                      >
-                        <div className="flex items-start gap-2">
-                          <Sparkles className={`mt-0.5 h-4 w-4`} />
-                          <div>
-                            <p className="text-xs font-medium">
-                              Workspace ready
-                            </p>
-                            <p
-                              className={`mt-1 text-[11px] leading-relaxed ${theme.profileTextMuted}`}
-                            >
-                              Manage clients, transactions, reports, and risk
-                              reviews from one place.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 flex items-center justify-between">
-                        <Link
-                          href="/settings"
-                          onClick={closeMobileMenu}
-                          className={`inline-flex items-center rounded-xl px-3 py-2 text-[11px] font-semibold transition ${theme.profileButton}`}
-                        >
-                          View profile
-                        </Link>
-
-                        <span className={`text-[11px] ${theme.profileTiny}`}>
-                          Secure session
-                        </span>
-                      </div>
-                    </>
-                  )}
-                </div>
-
                 {!collapsed && (
                   <div
-                    className={`mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.16em] ${theme.sectionLabel}`}
+                    className={`mb-3 px-2 text-[11px] font-semibold uppercase tracking-[0.16em] ${theme.sectionLabel}`}
                   >
                     Navigation
                   </div>
@@ -504,44 +412,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 </nav>
               </div>
 
-              <div className={`border-t p-3 space-y-2 ${theme.border}`}>
-                <Link
-                  href="/settings"
-                  onClick={closeMobileMenu}
-                  className={`flex items-center ${
-                    collapsed ? "justify-center px-2 py-3" : "gap-3 px-3 py-3"
-                  } rounded-2xl transition ${
-                    location === "/settings" ? theme.active : theme.settingsIdle
-                  }`}
-                  title={collapsed ? "Settings" : undefined}
-                >
-                  <div
-                    className={`flex h-10 w-10 items-center justify-center rounded-xl ${theme.settingsIcon}`}
-                  >
-                    <Settings className="h-[18px] w-[18px]" />
-                  </div>
-                  {!collapsed && (
-                    <span className="font-medium tracking-tight">Settings</span>
-                  )}
-                </Link>
-
-                <button
-                  onClick={() => logout()}
-                  className={`flex w-full items-center ${
-                    collapsed ? "justify-center px-2 py-3" : "gap-3 px-3 py-3"
-                  } rounded-2xl transition ${theme.logoutIdle}`}
-                  title={collapsed ? "Logout" : undefined}
-                >
-                  <div
-                    className={`flex h-10 w-10 items-center justify-center rounded-xl ${theme.settingsIcon}`}
-                  >
-                    <LogOut className="h-[18px] w-[18px]" />
-                  </div>
-                  {!collapsed && (
-                    <span className="font-medium tracking-tight">Logout</span>
-                  )}
-                </button>
-              </div>
+              <div className={`border-t p-3 ${theme.border}`} />
             </div>
           </motion.aside>
         )}
@@ -550,6 +421,51 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <main
         className={`relative flex min-w-0 flex-1 flex-col overflow-hidden ${theme.content}`}
       >
+        <header className={`sticky top-0 z-30 hidden h-16 items-center justify-end border-b px-6 backdrop-blur md:flex ${theme.sidebar} ${theme.border}`}>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setUserMenuOpen((open) => !open)}
+              className={`inline-flex items-center gap-2 rounded-2xl border px-3 py-2 transition ${theme.profileSubtle}`}
+              aria-label="Account menu"
+            >
+              <div className={`flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br ${theme.avatar} text-xs font-semibold text-white`}>
+                {initials}
+              </div>
+              <ChevronDown className={`h-4 w-4 transition ${userMenuOpen ? "rotate-180" : ""} ${theme.brandMuted}`} />
+            </button>
+
+            {userMenuOpen && (
+              <div className={`absolute right-0 mt-2 w-64 overflow-hidden rounded-2xl border shadow-xl ${theme.sidebar} ${theme.border}`}>
+                <div className={`border-b p-4 ${theme.border}`}>
+                  <div className="flex items-center gap-3">
+                    <UserCircle className={`h-9 w-9 ${theme.brandMuted}`} />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{user?.fullName || "TaxIntel User"}</p>
+                      <p className={`truncate text-xs ${theme.brandMuted}`}>{user?.email}</p>
+                    </div>
+                  </div>
+                </div>
+                <Link
+                  href="/settings"
+                  onClick={() => setUserMenuOpen(false)}
+                  className={`flex items-center gap-3 px-4 py-3 text-sm transition ${theme.settingsIdle}`}
+                >
+                  <Settings className="h-4 w-4" /> Settings
+                </Link>
+                <button
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    logout();
+                  }}
+                  className={`flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition ${theme.logoutIdle}`}
+                >
+                  <LogOut className="h-4 w-4" /> Logout
+                </button>
+              </div>
+            )}
+          </div>
+        </header>
         <div className={`flex-1 overflow-auto ${theme.content}`}>
           {children}
         </div>

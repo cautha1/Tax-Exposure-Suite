@@ -1,12 +1,14 @@
 import { Router, type IRouter } from "express";
-import { supabase, toCamel, sbErr } from "../lib/supabase.js";
+import { supabase, supabaseAuth, toCamel, sbErr } from "../lib/supabase.js";
 import {
   canCreateCompany,
   currentUser,
   getVisibleCompanyIds,
+  isPlatformAdmin,
   requireCompanyAccess,
   requireCompanyManager,
 } from "../lib/access.js";
+import { writeAuditLog } from "../lib/audit.js";
 
 const router: IRouter = Router();
 
@@ -41,6 +43,7 @@ const fmt = (c: Company) => ({
   country: c.country ?? null,
   financialYear: c.financialYear ?? null,
   riskLevel: c.riskLevel ?? null,
+  status: c.riskLevel === "suspended" ? "suspended" : "active",
   riskScore: c.riskScore != null ? Number(c.riskScore) : null,
   transactionCount: c.transactionCount ?? null,
   openFlagsCount: c.openFlagsCount ?? null,
@@ -128,6 +131,14 @@ router.post("/companies", async (req, res) => {
       }, { onConflict: "company_id,user_id" });
     }
 
+    await writeAuditLog(req, {
+      action: "company.created",
+      entityType: "company",
+      entityId: row.id,
+      companyId: row.id,
+      metadata: { companyName, assignedAdvisorId: advisorId },
+    });
+
     res.status(201).json(fmt(row));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
@@ -170,6 +181,14 @@ router.put("/companies/:id", async (req, res) => {
       }, { onConflict: "company_id,user_id" });
     }
 
+    await writeAuditLog(req, {
+      action: "company.updated",
+      entityType: "company",
+      entityId: row.id,
+      companyId: row.id,
+      metadata: { updatedFields: Object.keys(updates), assignedAdvisorId: assignedAdvisorId ?? null },
+    });
+
     res.json(fmt(row));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
@@ -185,7 +204,7 @@ router.get("/companies/:id/users", async (req, res) => {
 
     const profileMap: Record<string, { id: string; email: string | null; fullName: string | null; role: string }> = {};
     for (const uid of userIds) {
-      const { data: { user } } = await supabase.auth.admin.getUserById(uid);
+      const { data: { user } } = await supabaseAuth.auth.admin.getUserById(uid);
       if (user) {
         profileMap[uid] = {
           id: user.id,
@@ -202,6 +221,77 @@ router.get("/companies/:id/users", async (req, res) => {
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
+router.patch("/companies/:id/status", async (req, res) => {
+  const user = currentUser(req, res);
+  if (!user) return;
+  if (!isPlatformAdmin(user)) {
+    res.status(403).json({ error: "Only admins can change client status" });
+    return;
+  }
+
+  try {
+    const { status } = req.body ?? {};
+    if (status !== "active" && status !== "suspended") {
+      res.status(400).json({ error: "status must be active or suspended" });
+      return;
+    }
+
+    const updates: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+      risk_level: status === "suspended" ? "suspended" : "low",
+    };
+
+    const { data, error } = await supabase
+      .from("companies")
+      .update(updates)
+      .eq("id", req.params.id)
+      .select()
+      .single();
+    if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    const row = toCamel<Company>(data);
+
+    await writeAuditLog(req, {
+      action: status === "suspended" ? "company.suspended" : "company.activated",
+      entityType: "company",
+      entityId: row.id,
+      companyId: row.id,
+      metadata: { status },
+    });
+
+    res.json(fmt(row));
+  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
+});
+
+router.delete("/companies/:id", async (req, res) => {
+  const user = currentUser(req, res);
+  if (!user) return;
+  if (!isPlatformAdmin(user)) {
+    res.status(403).json({ error: "Only admins can delete clients" });
+    return;
+  }
+
+  try {
+    const { data: existing, error: fetchErr } = await supabase
+      .from("companies")
+      .select("id, company_name")
+      .eq("id", req.params.id)
+      .single();
+    if (fetchErr || !existing) { res.status(404).json({ error: "Not found" }); return; }
+
+    await writeAuditLog(req, {
+      action: "company.deleted",
+      entityType: "company",
+      entityId: req.params.id,
+      companyId: req.params.id,
+      metadata: { companyName: (existing as Record<string, unknown>).company_name },
+    });
+
+    const { error } = await supabase.from("companies").delete().eq("id", req.params.id);
+    sbErr(error, "delete company");
+    res.json({ success: true });
+  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
+});
+
 router.post("/companies/:id/users", async (req, res) => {
   const user = await requireCompanyManager(req, res, req.params.id);
   if (!user) return;
@@ -213,6 +303,13 @@ router.post("/companies/:id/users", async (req, res) => {
       company_id: req.params.id, user_id: targetUserId, role, assigned_by: user.id,
     }, { onConflict: "company_id,user_id" }).select().single();
     sbErr(error, "assign company user");
+    await writeAuditLog(req, {
+      action: "company_user.assigned",
+      entityType: "company_user",
+      entityId: (data as Record<string, unknown>)?.id as string | undefined,
+      companyId: req.params.id,
+      metadata: { targetUserId, role },
+    });
     res.status(201).json(toCamel(data));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });

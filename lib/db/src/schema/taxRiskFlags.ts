@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, numeric } from "drizzle-orm/pg-core";
+import { jsonb, pgTable, text, timestamp, uuid, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -16,6 +16,9 @@ export const taxRiskFlagsTable = pgTable("tax_risk_flags", {
   category: text("category"),
   confidence: text("confidence"),
   riskScore: numeric("risk_score"),
+  detectionMethod: text("detection_method"),
+  legalReference: text("legal_reference"),
+  evidence: jsonb("evidence").default({}).notNull(),
   reviewedAt: timestamp("reviewed_at"),
   reviewedBy: uuid("reviewed_by"),
   reviewNotes: text("review_notes"),

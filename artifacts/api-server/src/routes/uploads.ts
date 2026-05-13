@@ -31,11 +31,24 @@ router.get("/uploads", async (req, res) => {
     res.json((data ?? []).map((u: unknown) => {
       const row = toCamel<{
         id: string; companyId: string; fileName: string | null;
-        rowCount: number | null; status: string | null; createdAt: string;
+        rowCount: number | null; totalRows: number | null; validRows: number | null;
+        failedRows: number | null; duplicateRows: number | null; status: string | null;
+        errorSummary: unknown; advisorId: string | null; startedAt: string | null;
+        completedAt: string | null; createdAt: string;
       }>(u);
       return {
         id: row.id, companyId: row.companyId, fileName: row.fileName ?? null,
-        rowCount: row.rowCount ?? null, status: row.status ?? null, createdAt: row.createdAt,
+        rowCount: row.rowCount ?? null,
+        totalRows: row.totalRows ?? null,
+        validRows: row.validRows ?? null,
+        failedRows: row.failedRows ?? null,
+        duplicateRows: row.duplicateRows ?? null,
+        status: row.status ?? null,
+        errorSummary: row.errorSummary ?? [],
+        advisorId: row.advisorId ?? null,
+        startedAt: row.startedAt ?? null,
+        completedAt: row.completedAt ?? null,
+        createdAt: row.createdAt,
       };
     }));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }

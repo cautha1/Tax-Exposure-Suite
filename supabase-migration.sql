@@ -37,8 +37,16 @@ CREATE TABLE IF NOT EXISTS uploads (
   company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
   file_name TEXT,
   row_count INTEGER,
+  total_rows INTEGER DEFAULT 0,
+  valid_rows INTEGER DEFAULT 0,
+  failed_rows INTEGER DEFAULT 0,
+  duplicate_rows INTEGER DEFAULT 0,
   status TEXT DEFAULT 'completed',
+  error_summary JSONB NOT NULL DEFAULT '[]'::jsonb,
   uploaded_by UUID,
+  advisor_id UUID,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
@@ -60,6 +68,11 @@ CREATE TABLE IF NOT EXISTS transactions (
   vat_amount NUMERIC,
   withholding_tax_amount NUMERIC,
   transaction_type TEXT,
+  source_row_number INTEGER,
+  row_hash TEXT,
+  validation_status TEXT DEFAULT 'valid',
+  duplicate_of_transaction_id UUID REFERENCES transactions(id),
+  raw_data JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
@@ -78,6 +91,9 @@ CREATE TABLE IF NOT EXISTS tax_risk_flags (
   category TEXT,
   confidence TEXT,
   risk_score NUMERIC,
+  detection_method TEXT,
+  legal_reference TEXT,
+  evidence JSONB NOT NULL DEFAULT '{}'::jsonb,
   reviewed_at TIMESTAMPTZ,
   reviewed_by UUID,
   review_notes TEXT,
@@ -103,13 +119,27 @@ CREATE TABLE IF NOT EXISTS reports (
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
--- Disable Row Level Security (for service role access via API)
-ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;
-ALTER TABLE companies DISABLE ROW LEVEL SECURITY;
-ALTER TABLE uploads DISABLE ROW LEVEL SECURITY;
-ALTER TABLE transactions DISABLE ROW LEVEL SECURITY;
-ALTER TABLE tax_risk_flags DISABLE ROW LEVEL SECURITY;
-ALTER TABLE reports DISABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS activity_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  actor_user_id UUID,
+  actor_role TEXT,
+  company_id UUID REFERENCES companies(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id UUID,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+-- RLS baseline. The backend service role still bypasses RLS, but direct
+-- anon/client table access should not be broadly open.
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE uploads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tax_risk_flags ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE activity_logs ENABLE ROW LEVEL SECURITY;
 
 -- Seed demo companies
 INSERT INTO companies (id, company_name, tin_or_tax_id, industry, country, financial_year, risk_level, risk_score, transaction_count, open_flags_count, estimated_exposure)

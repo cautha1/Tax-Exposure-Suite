@@ -11,6 +11,8 @@ export const optionalRulesConfigTable = pgTable("optional_rules_config", {
   enabled: boolean("enabled").notNull().default(true),
   threshold: numeric("threshold"),
   description: text("description"),
+  ruleType: text("rule_type").default("heuristic"),
+  legalReference: text("legal_reference"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

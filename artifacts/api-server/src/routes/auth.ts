@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import type { User, Session } from "@supabase/supabase-js";
-import { supabase } from "../lib/supabase.js";
+import { supabaseAuth } from "../lib/supabase.js";
 import {
   formatAuthUser,
   requireAuth,
@@ -29,7 +29,7 @@ router.post("/auth/login", async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) { res.status(400).json({ error: "Email and password required" }); return; }
   try {
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabaseAuth.auth.signInWithPassword({
       email: email.toLowerCase(),
       password,
     });
@@ -55,7 +55,7 @@ router.post("/auth/signup", async (req, res) => {
   try {
     const userRole = PUBLIC_SIGNUP_ROLES.has(role) ? role : "advisor";
 
-    const { data, error } = await supabase.auth.admin.createUser({
+    const { data, error } = await supabaseAuth.auth.admin.createUser({
       email: email.toLowerCase(),
       password,
       user_metadata: { full_name: fullName, role: userRole },
@@ -71,7 +71,7 @@ router.post("/auth/signup", async (req, res) => {
     }
 
     const { data: sessionData, error: loginErr } =
-      await supabase.auth.signInWithPassword({
+      await supabaseAuth.auth.signInWithPassword({
         email: email.toLowerCase(),
         password,
       });
@@ -91,7 +91,7 @@ router.put("/profile", requireAuth, async (req, res) => {
   try {
     const { fullName, email, role, currentPassword, newPassword } = req.body;
 
-    const { data: { user: current }, error: fetchErr } = await supabase.auth.admin.getUserById(userId);
+    const { data: { user: current }, error: fetchErr } = await supabaseAuth.auth.admin.getUserById(userId);
     if (fetchErr || !current) { res.status(404).json({ error: "User not found" }); return; }
 
     const updates: Record<string, unknown> = {};
@@ -105,7 +105,7 @@ router.put("/profile", requireAuth, async (req, res) => {
 
     if (newPassword) {
       if (!currentPassword) { res.status(400).json({ error: "Current password required to set new password" }); return; }
-      const { error: verifyErr } = await supabase.auth.signInWithPassword({
+      const { error: verifyErr } = await supabaseAuth.auth.signInWithPassword({
         email: current.email!, password: currentPassword,
       });
       if (verifyErr) { res.status(401).json({ error: "Current password is incorrect" }); return; }
@@ -119,7 +119,7 @@ router.put("/profile", requireAuth, async (req, res) => {
 
     updates.user_metadata = metaUpdates;
 
-    const { data, error } = await supabase.auth.admin.updateUserById(userId, updates);
+    const { data, error } = await supabaseAuth.auth.admin.updateUserById(userId, updates);
     if (error) throw new Error(error.message);
 
     res.json(serializeAuthUser(formatAuthUser(data.user)));

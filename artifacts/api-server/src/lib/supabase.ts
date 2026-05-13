@@ -20,6 +20,10 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+export const supabaseAuth = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
 export function toCamel<T = Record<string, unknown>>(obj: unknown): T {
   if (Array.isArray(obj))
     return obj.map((item) => toCamel(item)) as unknown as T;
@@ -44,4 +48,13 @@ export function sbErr(
 ): void {
   if (error)
     throw new Error(`${context ? context + ": " : ""}${error.message}`);
+}
+
+export function isSchemaDriftError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return (
+    message.includes("schema cache") ||
+    message.includes("Could not find the") ||
+    message.includes("column") && message.includes("does not exist")
+  );
 }

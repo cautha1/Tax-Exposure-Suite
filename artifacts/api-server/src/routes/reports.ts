@@ -5,6 +5,7 @@ import {
   getVisibleCompanyIds,
   requireCompanyAccess,
 } from "../lib/access.js";
+import { writeAuditLog } from "../lib/audit.js";
 
 const router: IRouter = Router();
 
@@ -93,7 +94,15 @@ router.post("/reports", async (req, res) => {
       created_by: user.id,
     }).select().single();
     sbErr(error, "insert report");
-    res.status(201).json(fmtReport(toCamel<Report>(data), company.companyName));
+    const report = toCamel<Report>(data);
+    await writeAuditLog(req, {
+      action: "report.generated",
+      entityType: "report",
+      entityId: report.id,
+      companyId,
+      metadata: { highRisks, mediumRisks, lowRisks, totalExposure },
+    });
+    res.status(201).json(fmtReport(report, company.companyName));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 

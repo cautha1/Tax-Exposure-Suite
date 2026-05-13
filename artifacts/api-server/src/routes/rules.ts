@@ -26,8 +26,24 @@ export const DEFAULT_RULES = [
 interface RuleConfig {
   id: string; companyId: string | null; ruleCode: string; ruleName: string;
   category: string | null; enabled: boolean; threshold: number | string | null;
-  description: string | null; createdAt: string; updatedAt: string;
+  description: string | null; ruleType: string | null; legalReference: string | null;
+  createdAt: string; updatedAt: string;
 }
+
+const RULE_CLASSIFICATION: Record<string, { ruleType: string; legalReference: string }> = {
+  "VAT-001": { ruleType: "deterministic", legalReference: "Uganda VAT Act, standard VAT rate 18%" },
+  "VAT-002": { ruleType: "deterministic", legalReference: "Uganda VAT Act, standard VAT rate 18%" },
+  "VAT-003": { ruleType: "heuristic", legalReference: "Uganda VAT Act, taxable supplies classification" },
+  "WHT-001": { ruleType: "deterministic", legalReference: "Uganda Income Tax Act, withholding tax obligations" },
+  "WHT-002": { ruleType: "heuristic", legalReference: "Uganda Income Tax Act, WHT on service and professional payments" },
+  "WHT-003": { ruleType: "deterministic", legalReference: "Uganda Income Tax Act, WHT rate validation" },
+  "PAYE-001": { ruleType: "heuristic", legalReference: "Uganda Income Tax Act, PAYE employer obligations" },
+  "EXP-001": { ruleType: "heuristic", legalReference: "Uganda Income Tax Act, deductible expense review" },
+  "EXP-002": { ruleType: "heuristic", legalReference: "Uganda Income Tax Act, non-deductible expenditure" },
+  "EXP-003": { ruleType: "deterministic", legalReference: "Audit evidence rule: duplicate expense detection" },
+  "REV-001": { ruleType: "heuristic", legalReference: "Uganda VAT and income tax revenue review" },
+  "REV-002": { ruleType: "heuristic", legalReference: "Uganda VAT Act, revenue classification review" },
+};
 
 router.get("/rules", async (req, res) => {
   const user = currentUser(req, res);
@@ -44,7 +60,13 @@ router.get("/rules", async (req, res) => {
     sbErr(error, "list rules");
 
     if (!data || data.length === 0) {
-      res.json(DEFAULT_RULES.map(r => ({ ...r, id: null, companyId: companyId ?? null, createdAt: null })));
+      res.json(DEFAULT_RULES.map(r => ({
+        ...r,
+        ...(RULE_CLASSIFICATION[r.ruleCode] ?? { ruleType: "heuristic", legalReference: null }),
+        id: null,
+        companyId: companyId ?? null,
+        createdAt: null,
+      })));
       return;
     }
     res.json((data).map((r: unknown) => {
@@ -73,6 +95,7 @@ router.put("/rules/:ruleCode", async (req, res) => {
     const { data: existing } = await q.limit(1);
 
     const defaultRule = DEFAULT_RULES.find(r => r.ruleCode === ruleCode);
+    const classification = RULE_CLASSIFICATION[ruleCode] ?? { ruleType: "heuristic", legalReference: null };
 
     if (existing && existing.length > 0) {
       const curr = toCamel<RuleConfig>(existing[0]);
@@ -90,6 +113,8 @@ router.put("/rules/:ruleCode", async (req, res) => {
         rule_name: defaultRule?.ruleName ?? ruleCode,
         category: defaultRule?.category ?? "General",
         description: defaultRule?.description ?? null,
+        rule_type: classification.ruleType,
+        legal_reference: classification.legalReference,
         company_id: companyId ?? null,
         enabled: enabled ?? true,
         threshold: threshold != null ? threshold : (defaultRule?.threshold ?? null),
