@@ -16,6 +16,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   UserCircle,
+  BookOpen,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ const NAV_ITEMS = [
   { href: "/risks", label: "Tax Risks", icon: ShieldAlert },
   { href: "/reports", label: "Reports", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/knowledge", label: "Tax Knowledge", icon: BookOpen },
 ];
 
 function getInitials(name?: string) {

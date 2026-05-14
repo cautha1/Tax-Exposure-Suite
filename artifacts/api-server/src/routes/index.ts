@@ -13,6 +13,7 @@ import aiRouter from "./ai";
 import riskScoreRouter from "./riskScore";
 import activityRouter from "./activity";
 import { requireAuth } from "../middleware/auth.js";
+import ragRouter from "./rag";
 
 const router: IRouter = Router();
 
@@ -30,5 +31,6 @@ router.use(rulesRouter);
 router.use(aiRouter);
 router.use(riskScoreRouter);
 router.use(activityRouter);
+router.use(ragRouter);
 
 export default router;
