@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { supabase, toCamel } from "../lib/supabase.js";
+import { requireCompanyAccess } from "../lib/access.js";
 
 const router: IRouter = Router();
 
@@ -133,7 +134,8 @@ router.post("/ai/explain-risk", async (req, res) => {
 
     const { data: raw, error } = await supabase.from("tax_risk_flags").select("*").eq("id", riskId).single();
     if (error || !raw) { res.status(404).json({ error: "Risk not found" }); return; }
-    const risk = toCamel<{ id: string; ruleCode: string | null; riskType: string | null; description: string | null; estimatedExposure: string | null }>(raw);
+    const risk = toCamel<{ id: string; companyId: string; ruleCode: string | null; riskType: string | null; description: string | null; estimatedExposure: string | null }>(raw);
+    if (!(await requireCompanyAccess(req, res, risk.companyId))) return;
 
     const explanation = explainByRule(
       risk.ruleCode ?? "",

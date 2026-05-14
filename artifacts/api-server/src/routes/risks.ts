@@ -1,5 +1,13 @@
 import { Router, type IRouter } from "express";
 import { supabase, toCamel, sbErr } from "../lib/supabase.js";
+import {
+  UUID_RE,
+  currentUser,
+  emptyPaginated,
+  getVisibleCompanyIds,
+  requireCompanyAccess,
+} from "../lib/access.js";
+import { writeAuditLog } from "../lib/audit.js";
 
 const router: IRouter = Router();
 
@@ -7,7 +15,8 @@ interface RiskFlag {
   id: string; companyId: string; transactionId: string | null; ruleCode: string | null;
   issueTitle: string | null; riskType: string | null; description: string | null; severity: string | null;
   estimatedExposure: string | number | null; status: string | null; category: string | null;
-  riskScore: string | number | null; createdAt: string;
+  riskScore: string | number | null; detectionMethod: string | null; legalReference: string | null;
+  evidence: Record<string, unknown> | null; createdAt: string;
 }
 
 const fmtRisk = (r: RiskFlag, companyName?: string, transaction?: Record<string, unknown>) => ({
@@ -17,12 +26,16 @@ const fmtRisk = (r: RiskFlag, companyName?: string, transaction?: Record<string,
   severity: r.severity ?? null, estimatedExposure: r.estimatedExposure != null ? Number(r.estimatedExposure) : null,
   status: r.status ?? null, category: r.category ?? null,
   riskScore: r.riskScore != null ? Number(r.riskScore) : null,
+  detectionMethod: r.detectionMethod ?? null,
+  legalReference: r.legalReference ?? null,
+  evidence: r.evidence ?? null,
   companyName: companyName ?? null, transaction: transaction ?? null, createdAt: r.createdAt,
 });
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 router.get("/risks/summary", async (req, res) => {
+  const user = currentUser(req, res);
+  if (!user) return;
+
   try {
     const { companyId } = req.query as Record<string, string>;
     if (companyId && !UUID_RE.test(companyId)) {
@@ -30,7 +43,17 @@ router.get("/risks/summary", async (req, res) => {
       return;
     }
     let q = supabase.from("tax_risk_flags").select("status, estimated_exposure");
-    if (companyId) q = q.eq("company_id", companyId);
+    if (companyId) {
+      if (!(await requireCompanyAccess(req, res, companyId))) return;
+      q = q.eq("company_id", companyId);
+    } else {
+      const visibleCompanyIds = await getVisibleCompanyIds(user);
+      if (visibleCompanyIds && visibleCompanyIds.length === 0) {
+        res.json({ openCount: 0, reviewedCount: 0, resolvedCount: 0, totalExposure: 0 });
+        return;
+      }
+      if (visibleCompanyIds) q = q.in("company_id", visibleCompanyIds);
+    }
     const { data, error } = await q;
     sbErr(error, "risk summary");
 
@@ -46,6 +69,9 @@ router.get("/risks/summary", async (req, res) => {
 });
 
 router.get("/risks", async (req, res) => {
+  const user = currentUser(req, res);
+  if (!user) return;
+
   try {
     const {
       companyId, severity, status, riskType, category,
@@ -56,7 +82,17 @@ router.get("/risks", async (req, res) => {
     const offset = (pageNum - 1) * limitNum;
 
     let q = supabase.from("tax_risk_flags").select("*", { count: "exact" });
-    if (companyId) q = q.eq("company_id", companyId);
+    if (companyId) {
+      if (!(await requireCompanyAccess(req, res, companyId))) return;
+      q = q.eq("company_id", companyId);
+    } else {
+      const visibleCompanyIds = await getVisibleCompanyIds(user);
+      if (visibleCompanyIds && visibleCompanyIds.length === 0) {
+        res.json(emptyPaginated(pageNum, limitNum));
+        return;
+      }
+      if (visibleCompanyIds) q = q.in("company_id", visibleCompanyIds);
+    }
     if (severity) q = q.eq("severity", severity);
     if (status) q = q.eq("status", status);
     if (riskType) q = q.eq("risk_type", riskType);
@@ -68,7 +104,12 @@ router.get("/risks", async (req, res) => {
     const { data, error, count } = await q.order("created_at", { ascending: false }).range(offset, offset + limitNum - 1);
     sbErr(error, "list risks");
 
-    const { data: companiesRaw } = await supabase.from("companies").select("id, company_name");
+    let companiesQ = supabase.from("companies").select("id, company_name");
+    const visibleCompanyIds = await getVisibleCompanyIds(user);
+    if (visibleCompanyIds && visibleCompanyIds.length > 0) {
+      companiesQ = companiesQ.in("id", visibleCompanyIds);
+    }
+    const { data: companiesRaw } = await companiesQ;
     const companyMap: Record<string, string> = Object.fromEntries(
       (companiesRaw ?? []).map((c: Record<string, unknown>) => [c.id, c.company_name])
     );
@@ -88,6 +129,7 @@ router.get("/risks/:id", async (req, res) => {
     const { data: raw, error } = await supabase.from("tax_risk_flags").select("*").eq("id", req.params.id).single();
     if (error || !raw) { res.status(404).json({ error: "Not found" }); return; }
     const risk = toCamel<RiskFlag>(raw);
+    if (!(await requireCompanyAccess(req, res, risk.companyId))) return;
 
     const { data: coRaw } = await supabase.from("companies").select("id, company_name, industry, country, risk_level, risk_score").eq("id", risk.companyId).single();
     const company = coRaw ? toCamel<{ id: string; companyName: string; industry: string | null; country: string | null; riskLevel: string | null; riskScore: string | null }>(coRaw) : null;
@@ -110,18 +152,47 @@ router.get("/risks/:id", async (req, res) => {
 
 router.post("/risks/:id/review", async (req, res) => {
   try {
+    const { note } = req.body ?? {};
+    const { data: raw, error: fetchErr } = await supabase.from("tax_risk_flags").select("*").eq("id", req.params.id).single();
+    if (fetchErr || !raw) { res.status(404).json({ error: "Not found" }); return; }
+    const existing = toCamel<RiskFlag>(raw);
+    const user = await requireCompanyAccess(req, res, existing.companyId);
+    if (!user) return;
+
     const { data, error } = await supabase.from("tax_risk_flags").update({
-      status: "reviewed", updated_at: new Date().toISOString(),
+      status: "reviewed",
+      reviewed_at: new Date().toISOString(),
+      reviewed_by: user.id,
+      review_notes: typeof note === "string" ? note : undefined,
+      updated_at: new Date().toISOString(),
     }).eq("id", req.params.id).select().single();
     if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    await writeAuditLog(req, {
+      action: "risk.reviewed",
+      entityType: "tax_risk_flag",
+      entityId: req.params.id,
+      companyId: existing.companyId,
+      metadata: { hasNote: typeof note === "string" && note.length > 0 },
+    });
     res.json({ success: true, risk: fmtRisk(toCamel<RiskFlag>(data)) });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 router.post("/risks/:id/resolve", async (req, res) => {
   try {
+    const { note } = req.body ?? {};
+    const { data: raw, error: fetchErr } = await supabase.from("tax_risk_flags").select("*").eq("id", req.params.id).single();
+    if (fetchErr || !raw) { res.status(404).json({ error: "Not found" }); return; }
+    const existing = toCamel<RiskFlag>(raw);
+    const user = await requireCompanyAccess(req, res, existing.companyId);
+    if (!user) return;
+
     const { data, error } = await supabase.from("tax_risk_flags").update({
-      status: "resolved", updated_at: new Date().toISOString(),
+      status: "resolved",
+      resolved_at: new Date().toISOString(),
+      resolved_by: user.id,
+      review_notes: typeof note === "string" ? note : undefined,
+      updated_at: new Date().toISOString(),
     }).eq("id", req.params.id).select().single();
     if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
     const risk = toCamel<RiskFlag>(data);
@@ -134,6 +205,55 @@ router.post("/risks/:id/resolve", async (req, res) => {
         updated_at: new Date().toISOString(),
       }).eq("id", risk.companyId);
     }
+    await writeAuditLog(req, {
+      action: "risk.resolved",
+      entityType: "tax_risk_flag",
+      entityId: req.params.id,
+      companyId: existing.companyId,
+      metadata: { hasNote: typeof note === "string" && note.length > 0 },
+    });
+    res.json({ success: true, risk: fmtRisk(risk) });
+  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
+});
+
+router.post("/risks/:id/reopen", async (req, res) => {
+  try {
+    const { note } = req.body ?? {};
+    const { data: raw, error: fetchErr } = await supabase.from("tax_risk_flags").select("*").eq("id", req.params.id).single();
+    if (fetchErr || !raw) { res.status(404).json({ error: "Not found" }); return; }
+    const existing = toCamel<RiskFlag>(raw);
+    const user = await requireCompanyAccess(req, res, existing.companyId);
+    if (!user) return;
+
+    const { data, error } = await supabase.from("tax_risk_flags").update({
+      status: "open",
+      resolved_at: null,
+      resolved_by: null,
+      reviewed_at: null,
+      reviewed_by: null,
+      review_notes: typeof note === "string" ? note : null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", req.params.id).select().single();
+    if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    const risk = toCamel<RiskFlag>(data);
+
+    const { count: openCount } = await supabase
+      .from("tax_risk_flags")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", risk.companyId)
+      .eq("status", "open");
+    await supabase.from("companies").update({
+      open_flags_count: openCount ?? 0,
+      updated_at: new Date().toISOString(),
+    }).eq("id", risk.companyId);
+
+    await writeAuditLog(req, {
+      action: "risk.reopened",
+      entityType: "tax_risk_flag",
+      entityId: req.params.id,
+      companyId: existing.companyId,
+      metadata: { hasNote: typeof note === "string" && note.length > 0 },
+    });
     res.json({ success: true, risk: fmtRisk(risk) });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
@@ -142,8 +262,23 @@ router.patch("/risks/:id/note", async (req, res) => {
   try {
     const { note } = req.body;
     if (typeof note !== "string") { res.status(400).json({ error: "note (string) is required" }); return; }
-    const { data, error } = await supabase.from("tax_risk_flags").select("*").eq("id", req.params.id).single();
+    const { data: raw, error: fetchErr } = await supabase.from("tax_risk_flags").select("*").eq("id", req.params.id).single();
+    if (fetchErr || !raw) { res.status(404).json({ error: "Not found" }); return; }
+    const existing = toCamel<RiskFlag>(raw);
+    if (!(await requireCompanyAccess(req, res, existing.companyId))) return;
+
+    const { data, error } = await supabase.from("tax_risk_flags").update({
+      internal_note: note,
+      updated_at: new Date().toISOString(),
+    }).eq("id", req.params.id).select().single();
     if (error || !data) { res.status(404).json({ error: "Not found" }); return; }
+    await writeAuditLog(req, {
+      action: "risk.note_updated",
+      entityType: "tax_risk_flag",
+      entityId: req.params.id,
+      companyId: existing.companyId,
+      metadata: { noteLength: note.length },
+    });
     res.json({ success: true, risk: fmtRisk(toCamel<RiskFlag>(data)) });
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });

@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { AppLayout } from '@/components/layout';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { ShieldAlert, CheckCircle2, AlertCircle, Eye, Search, ChevronDown, ChevronUp, X, Lightbulb, StickyNote, Loader2 } from 'lucide-react';
+import { ShieldAlert, CheckCircle2, AlertCircle, Eye, Search, ChevronDown, ChevronUp, X, Lightbulb, StickyNote, Loader2, RotateCcw } from 'lucide-react';
 
 const STATUS_TABS = [
   { key: 'open',     label: 'Open' },
@@ -49,6 +49,8 @@ interface Risk {
   reviewedBy?: string | null; reviewNotes?: string | null;
   riskScore?: number | null; internalNote?: string | null;
   resolvedBy?: string | null; resolvedAt?: string | null;
+  detectionMethod?: string | null; legalReference?: string | null;
+  evidence?: Record<string, unknown> | null;
 }
 
 interface ExplainResult {
@@ -58,7 +60,7 @@ interface ExplainResult {
   recommendation: string;
 }
 
-function RiskCard({ risk, onAction }: { risk: Risk; onAction: (id: string, action: 'review' | 'resolve') => Promise<void> }) {
+function RiskCard({ risk, onAction }: { risk: Risk; onAction: (id: string, action: 'review' | 'resolve' | 'reopen') => Promise<void> }) {
   const [isActioning, setIsActioning] = useState(false);
   const [showExplain, setShowExplain] = useState(false);
   const [explanation, setExplanation] = useState<ExplainResult | null>(null);
@@ -77,7 +79,7 @@ function RiskCard({ risk, onAction }: { risk: Risk; onAction: (id: string, actio
   const formatCurrency = (val?: number | null) =>
     val != null ? `UGX ${new Intl.NumberFormat('en-UG').format(val)}` : '-';
 
-  const handleAction = async (action: 'review' | 'resolve') => {
+  const handleAction = async (action: 'review' | 'resolve' | 'reopen') => {
     setIsActioning(true);
     try {
       await onAction(risk.id, action);
@@ -147,9 +149,29 @@ function RiskCard({ risk, onAction }: { risk: Risk; onAction: (id: string, actio
                   Score: {risk.riskScore}
                 </span>
               )}
+              {risk.detectionMethod && (
+                <span className="px-2 py-0.5 rounded bg-cyan-50 text-cyan-700 text-xs font-semibold border border-cyan-200 capitalize">
+                  {risk.detectionMethod}
+                </span>
+              )}
             </div>
 
             <p className="text-sm font-medium text-foreground leading-snug mb-2">{risk.description}</p>
+
+            {(risk.legalReference || risk.evidence) && (
+              <div className="mb-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                {risk.legalReference && (
+                  <div className="px-3 py-2 bg-sky-50 border border-sky-200 rounded-lg text-xs text-sky-800">
+                    <span className="font-bold">Reference:</span> {risk.legalReference}
+                  </div>
+                )}
+                {risk.evidence && Object.keys(risk.evidence).length > 0 && (
+                  <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
+                    <span className="font-bold">Evidence:</span> {Object.entries(risk.evidence).slice(0, 3).map(([key, value]) => `${key}: ${String(value)}`).join(' | ')}
+                  </div>
+                )}
+              </div>
+            )}
 
             {savedNote && (
               <div className="mb-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-start gap-1.5">
@@ -227,9 +249,18 @@ function RiskCard({ risk, onAction }: { risk: Risk; onAction: (id: string, actio
             )}
 
             {risk.status === 'resolved' && (
-              <span className="px-3 py-1.5 bg-emerald-50 rounded-lg text-xs font-semibold text-emerald-700 flex items-center gap-1.5 border border-emerald-200">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Resolved
-              </span>
+              <div className="flex flex-col gap-2 w-full">
+                <span className="px-3 py-1.5 bg-emerald-50 rounded-lg text-xs font-semibold text-emerald-700 flex items-center gap-1.5 border border-emerald-200 justify-center">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Resolved
+                </span>
+                <button
+                  onClick={() => handleAction('reopen')}
+                  disabled={isActioning}
+                  className="px-3 py-1.5 bg-background border-2 border-border text-foreground rounded-lg text-xs font-semibold hover:border-primary hover:text-primary hover:bg-primary/5 transition-all flex items-center gap-1.5 disabled:opacity-50 justify-center w-full"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Reopen
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -341,7 +372,7 @@ export default function Risks() {
   const formatCurrency = (val?: number | null) =>
     val != null ? `UGX ${new Intl.NumberFormat('en-UG').format(val)}` : '-';
 
-  const handleAction = useCallback(async (id: string, action: 'review' | 'resolve') => {
+  const handleAction = useCallback(async (id: string, action: 'review' | 'resolve' | 'reopen') => {
     await api.post(`/risks/${id}/${action}`, {});
     queryClient.invalidateQueries({ queryKey: ['risks'] });
   }, [queryClient]);

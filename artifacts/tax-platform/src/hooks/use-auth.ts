@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { api } from "../lib/api";
+import { api, AUTH_EXPIRED_EVENT, SESSION_KEY } from "../lib/api";
 
 export interface AuthUser {
   id: string;
@@ -17,7 +17,29 @@ export interface AuthSession {
   isLoading: boolean;
 }
 
-const SESSION_KEY = "tax_platform_session";
+export interface AuthResponse {
+  user: AuthUser;
+  accessToken: string;
+  refreshToken: string | null;
+  expiresAt: number | null;
+}
+
+function readStoredSession(): AuthResponse | null {
+  const stored = localStorage.getItem(SESSION_KEY);
+  if (!stored) return null;
+
+  try {
+    const parsed = JSON.parse(stored) as Partial<AuthResponse>;
+    if (parsed.user?.id && parsed.accessToken) {
+      return parsed as AuthResponse;
+    }
+  } catch {
+    // fall through to cleanup
+  }
+
+  localStorage.removeItem(SESSION_KEY);
+  return null;
+}
 
 export function useAuth() {
   const [, setLocation] = useLocation();
@@ -27,25 +49,48 @@ export function useAuth() {
     isLoading: true,
   });
 
+  const clearSession = () => {
+    localStorage.removeItem(SESSION_KEY);
+    setSession({ user: null, isAuthenticated: false, isLoading: false });
+  };
+
   useEffect(() => {
-    const stored = localStorage.getItem(SESSION_KEY);
+    let cancelled = false;
+
+    const expireSession = () => {
+      if (cancelled) return;
+      clearSession();
+      setLocation("/login");
+    };
+
+    window.addEventListener(AUTH_EXPIRED_EVENT, expireSession);
+
+    const stored = readStoredSession();
     if (stored) {
-      try {
-        const user = JSON.parse(stored) as AuthUser;
-        setSession({ user, isAuthenticated: true, isLoading: false });
-      } catch {
-        localStorage.removeItem(SESSION_KEY);
-        setSession({ user: null, isAuthenticated: false, isLoading: false });
-      }
+      api.get<AuthUser>("/auth/me")
+        .then(user => {
+          if (cancelled) return;
+          const refreshed = { ...stored, user };
+          localStorage.setItem(SESSION_KEY, JSON.stringify(refreshed));
+          setSession({ user, isAuthenticated: true, isLoading: false });
+        })
+        .catch(() => {
+          if (!cancelled) expireSession();
+        });
     } else {
       setSession({ user: null, isAuthenticated: false, isLoading: false });
     }
-  }, []);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener(AUTH_EXPIRED_EVENT, expireSession);
+    };
+  }, [setLocation]);
 
   const login = async (email: string, password: string): Promise<void> => {
-    const user = await api.post<AuthUser>("/auth/login", { email, password });
-    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-    setSession({ user, isAuthenticated: true, isLoading: false });
+    const auth = await api.post<AuthResponse>("/auth/login", { email, password });
+    localStorage.setItem(SESSION_KEY, JSON.stringify(auth));
+    setSession({ user: auth.user, isAuthenticated: true, isLoading: false });
     setLocation("/dashboard");
   };
 
@@ -56,15 +101,15 @@ export function useAuth() {
     role: string,
     companyId?: string
   ): Promise<void> => {
-    const user = await api.post<AuthUser>("/auth/signup", {
+    const auth = await api.post<AuthResponse>("/auth/signup", {
       email,
       password,
       fullName,
       role,
       companyId,
     });
-    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-    setSession({ user, isAuthenticated: true, isLoading: false });
+    localStorage.setItem(SESSION_KEY, JSON.stringify(auth));
+    setSession({ user: auth.user, isAuthenticated: true, isLoading: false });
     setLocation("/dashboard");
   };
 
@@ -75,7 +120,7 @@ export function useAuth() {
       // ignore errors on logout
     }
     localStorage.removeItem(SESSION_KEY);
-    setSession({ user: null, isAuthenticated: false, isLoading: false });
+    clearSession();
     setLocation("/login");
   };
 

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, numeric } from "drizzle-orm/pg-core";
+import { integer, jsonb, pgTable, text, timestamp, uuid, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -19,6 +19,11 @@ export const transactionsTable = pgTable("transactions", {
   vatAmount: numeric("vat_amount"),
   withholdingTaxAmount: numeric("withholding_tax_amount"),
   transactionType: text("transaction_type"),
+  sourceRowNumber: integer("source_row_number"),
+  rowHash: text("row_hash"),
+  validationStatus: text("validation_status").default("valid"),
+  duplicateOfTransactionId: uuid("duplicate_of_transaction_id"),
+  rawData: jsonb("raw_data").default({}).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

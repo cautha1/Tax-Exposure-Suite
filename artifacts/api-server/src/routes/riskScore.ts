@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { supabase, toCamel } from "../lib/supabase.js";
+import { requireCompanyAccess } from "../lib/access.js";
 
 const router: IRouter = Router();
 
@@ -13,6 +14,7 @@ function riskLevelFromScore(score: number): string {
 router.get("/risk-score/company/:id", async (req, res) => {
   try {
     const { id } = req.params;
+    if (!(await requireCompanyAccess(req, res, id))) return;
 
     const { data: companyRaw, error } = await supabase.from("companies").select("*").eq("id", id).single();
     if (error || !companyRaw) { res.status(404).json({ error: "Company not found" }); return; }

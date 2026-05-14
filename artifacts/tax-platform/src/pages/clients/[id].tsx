@@ -3,7 +3,7 @@ import { useRoute } from 'wouter';
 import { AppLayout } from '@/components/layout';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Building2, MapPin, Hash, Briefcase, FileSpreadsheet, ArrowLeft } from 'lucide-react';
+import { Building2, MapPin, Hash, Briefcase, FileSpreadsheet, ArrowLeft, Clock3 } from 'lucide-react';
 import { Link } from 'wouter';
 
 interface Company {
@@ -26,6 +26,15 @@ interface CompanySummary {
   severityBreakdown: { severity: string; count: number }[];
 }
 
+interface ActivityLog {
+  id: string;
+  action: string;
+  entityType: string;
+  companyName?: string | null;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
 export default function ClientDetail() {
   const [, params] = useRoute('/clients/:id');
   const id = params?.id || '';
@@ -40,6 +49,12 @@ export default function ClientDetail() {
   const { data: summary } = useQuery<CompanySummary>({
     queryKey: ['company-summary', id],
     queryFn: () => api.get<CompanySummary>(`/companies/${id}/summary`),
+    enabled: !!id,
+  });
+
+  const { data: activity } = useQuery<{ data: ActivityLog[]; total: number }>({
+    queryKey: ['company-activity', id],
+    queryFn: () => api.get<{ data: ActivityLog[]; total: number }>(`/activity?companyId=${id}&limit=25`),
     enabled: !!id,
   });
 
@@ -85,7 +100,7 @@ export default function ClientDetail() {
           </div>
 
           <div className="flex gap-8 border-b border-border overflow-x-auto">
-            {['overview', 'transactions', 'risks', 'reports'].map(tab => (
+            {['overview', 'transactions', 'risks', 'reports', 'activity'].map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -149,7 +164,39 @@ export default function ClientDetail() {
           </div>
         )}
 
-        {activeTab !== 'overview' && (
+        {activeTab === 'activity' && (
+          <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-border">
+              <h3 className="text-lg font-semibold text-foreground">Review Trail</h3>
+              <p className="text-sm text-muted-foreground">Imports, analysis runs, risk actions, notes, and reports for this client.</p>
+            </div>
+            <div className="divide-y divide-border">
+              {(activity?.data ?? []).map(item => (
+                <div key={item.id} className="p-4 flex gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                    <Clock3 className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-foreground">{item.action.replaceAll('.', ' ')}</p>
+                      <span className="px-2 py-0.5 rounded bg-muted text-muted-foreground text-xs">{item.entityType}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {new Date(item.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              ))}
+              {(activity?.data ?? []).length === 0 && (
+                <div className="p-10 text-center text-muted-foreground">
+                  No advisory activity recorded yet.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab !== 'overview' && activeTab !== 'activity' && (
           <div className="text-center p-12 bg-card rounded-2xl border border-border border-dashed">
             <h3 className="text-lg font-semibold text-foreground capitalize">{activeTab}</h3>
             <p className="text-muted-foreground mt-2">See dedicated pages for full table views.</p>

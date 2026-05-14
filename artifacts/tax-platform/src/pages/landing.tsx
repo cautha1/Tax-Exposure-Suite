@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'wouter';
-import { motion, useScroll, useTransform, useInView, animate } from 'framer-motion';
+import { motion, useScroll, useTransform, useInView, animate, type Variants } from 'framer-motion';
 import {
   ArrowRight, ChevronDown, BarChart3, ShieldCheck, FileSearch,
   Users, Zap, Lock, TrendingUp, CheckCircle, Building2
@@ -34,8 +34,9 @@ function Blob({ color, style }: { color: string; style?: React.CSSProperties }) 
   );
 }
 
-const fadeUp = { hidden: { opacity: 0, y: 28 }, show: { opacity: 1, y: 0, transition: { duration: 0.65, ease: [0.22, 1, 0.36, 1] } } };
-const stagger = { show: { transition: { staggerChildren: 0.12 } } };
+const softEase = [0.22, 1, 0.36, 1] as const;
+const fadeUp: Variants = { hidden: { opacity: 0, y: 28 }, show: { opacity: 1, y: 0, transition: { duration: 0.65, ease: softEase } } };
+const stagger: Variants = { show: { transition: { staggerChildren: 0.12 } } };
 
 // ─── Feature row ─────────────────────────────────────────────────────────────
 function FeatureRow({ icon: Icon, tag, title, desc, accent, reverse, points }: {
@@ -50,7 +51,7 @@ function FeatureRow({ icon: Icon, tag, title, desc, accent, reverse, points }: {
         className="flex-1"
         initial={{ opacity: 0, x: reverse ? 40 : -40 }}
         animate={inView ? { opacity: 1, x: 0 } : {}}
-        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: 0.7, ease: softEase }}
       >
         <span className="inline-block text-xs font-semibold uppercase tracking-widest mb-4 px-3 py-1 rounded-full" style={{ background: accent + '30', color: accent }}>
           {tag}
@@ -71,7 +72,7 @@ function FeatureRow({ icon: Icon, tag, title, desc, accent, reverse, points }: {
         className="flex-1 flex justify-center"
         initial={{ opacity: 0, x: reverse ? -40 : 40 }}
         animate={inView ? { opacity: 1, x: 0 } : {}}
-        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1], delay: 0.1 }}
+        transition={{ duration: 0.7, ease: softEase, delay: 0.1 }}
       >
         <div className="relative w-72 h-72 lg:w-80 lg:h-80 rounded-3xl flex items-center justify-center"
           style={{ background: `linear-gradient(135deg, ${accent}18 0%, ${accent}08 100%)`, border: `1px solid ${accent}25` }}>

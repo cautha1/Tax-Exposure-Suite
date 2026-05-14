@@ -1,44 +1,44 @@
 import { Router, type IRouter } from "express";
-import { supabase } from "../lib/supabase.js";
+import type { User, Session } from "@supabase/supabase-js";
+import { supabaseAuth } from "../lib/supabase.js";
+import {
+  formatAuthUser,
+  requireAuth,
+  serializeAuthUser,
+} from "../middleware/auth.js";
 
 const router: IRouter = Router();
 
-interface AuthUser {
-  id: string;
-  email?: string;
-  user_metadata?: { full_name?: string; role?: string; company_id?: string };
-  created_at?: string;
+const PUBLIC_SIGNUP_ROLES = new Set(["advisor", "client_user"]);
+
+function fmtSession(data: { user: User; session?: Session | null }) {
+  return {
+    user: serializeAuthUser(formatAuthUser(data.user)),
+    accessToken: data.session?.access_token ?? null,
+    refreshToken: data.session?.refresh_token ?? null,
+    expiresAt: data.session?.expires_at ?? null,
+  };
 }
 
-const fmt = (u: AuthUser) => ({
-  id: u.id,
-  email: u.email ?? null,
-  fullName: u.user_metadata?.full_name ?? null,
-  role: u.user_metadata?.role ?? "advisor",
-  companyId: u.user_metadata?.company_id ?? null,
-  createdAt: u.created_at ?? new Date().toISOString(),
-});
-
-router.get("/auth/me", async (req, res) => {
-  const userId = req.headers["x-user-id"] as string;
-  if (!userId) { res.status(401).json({ error: "Unauthorized" }); return; }
-  try {
-    const { data: { user }, error } = await supabase.auth.admin.getUserById(userId);
-    if (error || !user) { res.status(404).json({ error: "Not found" }); return; }
-    res.json(fmt(user));
-  } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
+router.get("/auth/me", requireAuth, (req, res) => {
+  if (!req.user) { res.status(401).json({ error: "Unauthorized" }); return; }
+  res.json(serializeAuthUser(req.user));
 });
 
 router.post("/auth/login", async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) { res.status(400).json({ error: "Email and password required" }); return; }
   try {
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabaseAuth.auth.signInWithPassword({
       email: email.toLowerCase(),
       password,
     });
     if (error || !data.user) { res.status(401).json({ error: "Invalid credentials" }); return; }
-    res.json(fmt(data.user));
+    if (!data.session?.access_token) {
+      res.status(401).json({ error: "Unable to create authenticated session" });
+      return;
+    }
+    res.json(fmtSession({ user: data.user, session: data.session }));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
@@ -48,15 +48,14 @@ router.post("/auth/signup", async (req, res) => {
     res.status(400).json({ error: "Email, password, and full name are required" });
     return;
   }
-  if (password.length < 6) {
-    res.status(400).json({ error: "Password must be at least 6 characters" });
+  if (password.length < 8) {
+    res.status(400).json({ error: "Password must be at least 8 characters" });
     return;
   }
   try {
-    const allowed = ["advisor", "client_user", "admin"];
-    const userRole = allowed.includes(role) ? role : "advisor";
+    const userRole = PUBLIC_SIGNUP_ROLES.has(role) ? role : "advisor";
 
-    const { data, error } = await supabase.auth.admin.createUser({
+    const { data, error } = await supabaseAuth.auth.admin.createUser({
       email: email.toLowerCase(),
       password,
       user_metadata: { full_name: fullName, role: userRole },
@@ -71,35 +70,46 @@ router.post("/auth/signup", async (req, res) => {
       throw new Error(error.message);
     }
 
-    res.status(201).json(fmt(data.user));
+    const { data: sessionData, error: loginErr } =
+      await supabaseAuth.auth.signInWithPassword({
+        email: email.toLowerCase(),
+        password,
+      });
+    if (loginErr || !sessionData.user || !sessionData.session?.access_token) {
+      throw new Error(loginErr?.message ?? "Unable to create session");
+    }
+
+    res.status(201).json(
+      fmtSession({ user: sessionData.user, session: sessionData.session }),
+    );
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
-router.put("/profile", async (req, res) => {
-  const userId = req.headers["x-user-id"] as string;
+router.put("/profile", requireAuth, async (req, res) => {
+  const userId = req.user?.id;
   if (!userId) { res.status(401).json({ error: "Unauthorized" }); return; }
   try {
     const { fullName, email, role, currentPassword, newPassword } = req.body;
 
-    const { data: { user: current }, error: fetchErr } = await supabase.auth.admin.getUserById(userId);
+    const { data: { user: current }, error: fetchErr } = await supabaseAuth.auth.admin.getUserById(userId);
     if (fetchErr || !current) { res.status(404).json({ error: "User not found" }); return; }
 
     const updates: Record<string, unknown> = {};
     const metaUpdates = { ...current.user_metadata };
 
     if (fullName) metaUpdates.full_name = fullName;
-    if (role && current.user_metadata?.role === "admin") {
+    if (role && req.user?.role === "admin") {
       const allowed = ["advisor", "client_user", "admin"];
       if (allowed.includes(role)) metaUpdates.role = role;
     }
 
     if (newPassword) {
       if (!currentPassword) { res.status(400).json({ error: "Current password required to set new password" }); return; }
-      const { error: verifyErr } = await supabase.auth.signInWithPassword({
+      const { error: verifyErr } = await supabaseAuth.auth.signInWithPassword({
         email: current.email!, password: currentPassword,
       });
       if (verifyErr) { res.status(401).json({ error: "Current password is incorrect" }); return; }
-      if (newPassword.length < 6) { res.status(400).json({ error: "New password must be at least 6 characters" }); return; }
+      if (newPassword.length < 8) { res.status(400).json({ error: "New password must be at least 8 characters" }); return; }
       updates.password = newPassword;
     }
 
@@ -109,13 +119,13 @@ router.put("/profile", async (req, res) => {
 
     updates.user_metadata = metaUpdates;
 
-    const { data, error } = await supabase.auth.admin.updateUserById(userId, updates);
+    const { data, error } = await supabaseAuth.auth.admin.updateUserById(userId, updates);
     if (error) throw new Error(error.message);
 
-    res.json(fmt(data.user));
+    res.json(serializeAuthUser(formatAuthUser(data.user)));
   } catch (err) { req.log.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
-router.post("/auth/logout", (_req, res) => { res.json({ success: true }); });
+router.post("/auth/logout", requireAuth, (_req, res) => { res.json({ success: true }); });
 
 export default router;
